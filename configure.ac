@@ -267,6 +267,7 @@ PLUMED_CONFIG_ENABLE([python],[search for python],[yes])
 PLUMED_CONFIG_ENABLE([af_ocl],[arrayfire_opencl],[search for arrayfire],[no])
 PLUMED_CONFIG_ENABLE([af_cuda],[arrayfire_cuda],[search for arrayfire],[no])
 PLUMED_CONFIG_ENABLE([af_cpu],[arrayfire_cpu],[search for arrayfire],[no])
+PLUMED_CONFIG_ENABLE([dynet],[search for dynet],[yes])
 
 AC_ARG_VAR(SOEXT,[extension of dynamic libraries (so/dylib)])
 AC_ARG_VAR(STATIC_LIBS,[variables that should be linked statically directly to MD code - configure will add here -ldl if necessary ])
@@ -346,6 +347,11 @@ fi
 if test $debug == true
 then
   PLUMED_CHECK_CXXFLAG([-g])
+fi
+
+if test $dynet == true
+then
+  PLUMED_CHECK_CXXFLAG([-ldynet])
 fi
 
 if test $gcov == true
@@ -791,6 +797,22 @@ fi
 if test "$af_cpu" == true ; then
   PLUMED_CHECK_PACKAGE([arrayfire.h],[af_is_double],[__PLUMED_HAS_ARRAYFIRE],[afcpu])
 fi
+if test $dynet == true ; then
+  PLUMED_CHECK_CXX_PACKAGE([dynet],[
+#include <dynet/dynet.h>
+using namespace dynet;
+int
+main (int argc,char** argv)
+{
+  dynet::initialize(argc,argv);
+  ParameterCollection pc;
+  Parameter p_W = pc.add_parameters({1, 2});
+  Parameter p_b = pc.add_parameters({1});
+  return 0;
+}
+  ], [__PLUMED_HAS_DYNET], [dynet])
+fi
+
 
 # in non-debug mode, add -DNDEBUG
 if test "$debug" == false ; then
