@@ -35,18 +35,18 @@ namespace bias {
 
 //+PLUMEDOC BIAS NN_VES
 /*
- * Implementation of VES for experimental target. Very similar to Bussi's MaxEnt.
- * Bias is linear in the CVs
- * It is possible to add Gaussian uncertainties to the target
+ * To be added
 */
 //+ENDPLUMEDOC
+
+typedef std::vector< std::vector<float> > matrix;
 
 class NeuralNetworkVes : public Bias {
 
 private:
    
   unsigned dim_;
-  std::vector<int> nodes_;
+  vector<int> nodes_;
   
   double beta_;
   double stride_;
@@ -59,8 +59,32 @@ private:
   ComputationGraph cg_;
   MLP nn_;
 
+//calculation of omega
+  int counter_;
+  //matrix old_s_;
+  vector<float> old_s_;
+
+//target distribution
+  float min_, max_;
+  float ds_; 
+  int nbins_;
+  vector<float> s_grid;
+  vector<float> target_;
+
+//auxiliary
+  int iter;
+  vector<vector<float>> grad_w;
+  vector<vector<float>> grad_b;
+  vector<vector<float>> ave_grad_w;
+  vector<vector<float>> ave_grad_b;
+  vector<vector<float>> target_grad_w;
+  vector<vector<float>> target_grad_b;
+
+
 //output values
   Value* valueOmega;
+  Value* valueOmegaBias;
+  Value* valueOmegaTarget;
   Value* valueForceTot2;
 
 //class private methods
@@ -79,6 +103,8 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
   Bias::registerKeywords(keys);
   keys.use("ARG");
   keys.add("compulsory","NODES","neural network architecture");
+  keys.add("compulsory","RANGE","min and max of the range allowed");
+  keys.add("optional","NBINS","bins for target distro");
 
   keys.add("optional","TEMP","temperature of the simulation");
   keys.add("optional","UP_STRIDE","the number of steps between updating coeffs");
@@ -98,17 +124,10 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   PLUMED_BIAS_INIT(ao),
   nn_(m_)
 {
-// how to parse flags!!
-//  fixed_bias_=false;
-//  parseFlag("FIXED_BIAS",fixed_bias_); 
-
   //get # of inputs (CVs)
   dim_=getNumberOfArguments();
   //parse the NN architecture
   parseVector("NODES",nodes_);
-
-//initialize vectors!!
-//  valueGradOmega.resize(dim_);
 
   // parse temp  
   const double Kb=plumed.getAtoms().getKBoltzmann();
@@ -122,10 +141,40 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   }
   beta_=1.0/KbT; //remember: with LJ use NATURAL UNITS
 
+  // parse GRID INFO
+  // range 
+  vector<float> range;
+  parseVector("RANGE",range);
+  min_=range[0];
+  max_=range[1];
+
+  // nbins
+  nbins_=50;
+  parse("NBINS", nbins_);
+  // spacing and grid values
+  s_grid.resize(nbins_);
+  ds_ = fabs(max_-min_)/nbins_;
+  unsigned k = 0;
+  for (auto&& s2 : s_grid)
+    s2 = min_+(k++)*ds_;
+
+  //define target distribution
+  target_.resize(nbins_); 
+  for (auto&& t : target_)
+    t = 1/fabs(max_-min_);
+
+// debug
+  for(unsigned i=0;i<nbins_;i++){
+	cerr << s_grid[i] << "  " << target_[i] << endl;
+}
+
   // parse the update stride
   stride_=500;
   parse("UP_STRIDE",stride_);
-
+  
+  // reset counter
+  counter_=0;
+ 
   // check whether to use an exponentially decaying average
   tau_=0;
   parse("TAU",tau_);
@@ -138,6 +187,9 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
 
   checkRead();
 
+//auxiliary
+  iter=0;
+
 //initialize dynet
   int cc=1;
   char pp[]="plumed";
@@ -148,40 +200,50 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   params.random_seed=random_seed;
   dynet::initialize(params);
 
+//for debugging purpose
+  cg_.set_immediate_compute(true);
+  cg_.set_check_validity(true);
+
 //defining the neural network
   string opt_name;
   trainer_ = new_trainer("Adam",m_,opt_name);
 
-cerr << dim_ << endl;
-for ( unsigned i=0; i<nodes_.size(); i++)
-	cerr << nodes_[i] << endl;
-
+  log.printf("  Defining neural network with %d layers",nodes_.size() );
 //define layers
   vector<Layer> layers;
   //input to first layer
-  log.printf("  [NN] First layer: %d - %d\n",dim_, nodes_[0]);
+  log.printf("  - Input: %d --> %d\n",dim_, nodes_[0]);
   layers.push_back( Layer(dim_, nodes_[0], RELU, 0.0) );
   //hidden layers
   for ( unsigned i=0; i<nodes_.size()-1; i++){
     layers.push_back( Layer(nodes_[i], nodes_[i+1], RELU, 0.0) );
-   log.printf("  [NN] Layer %d: %d - %d\n",i,nodes_[i], nodes_[i+1]);
+   log.printf("  - Layer %d: %d --> %d\n",i,nodes_[i], nodes_[i+1]);
   }
   //last layer to output
   layers.push_back( Layer(nodes_.back(),1, LINEAR, 0.0) );
-  log.printf("  [NN] Last layer: %d - %d\n",nodes_.back(), 1);
+  log.printf("  - Output: %d --> %d\n",nodes_.back(), 1);
 
 //create nn with specified architecture
   for (auto&& l : layers)
-    nn_.append(m_,l);
+    nn_.append(m_,l,cg_);
 
 //debug
   cg_.print_graphviz();
+
+//define vars to store previous values
+  //old_s_.resize(stride_, vector<float>(dim_));
+  old_s_.resize(stride_);
 
 //add all the output components
   addComponent("force2"); componentIsNotPeriodic("force2");
   valueForceTot2=getPntrToComponent("force2");
   addComponent("omega"); componentIsNotPeriodic("omega");
   valueOmega=getPntrToComponent("omega");
+  addComponent("omegaBias"); componentIsNotPeriodic("omegaBias");
+  valueOmegaBias=getPntrToComponent("omegaBias");
+  addComponent("omegaTarget"); componentIsNotPeriodic("omegaTarget");
+  valueOmegaTarget=getPntrToComponent("omegaTarget");
+
 
 //printing some info
   log.printf("  Inputs: %d\n",dim_);
@@ -203,20 +265,37 @@ NeuralNetworkVes::~NeuralNetworkVes()
 
 void NeuralNetworkVes::calculate()
 {
+  cg_.clear();
+
   double bias_pot=0;
   double tot_force2=0;
-  std::vector<double> current_S(dim_);  
+  std::vector<float> current_S(dim_);  
+  float min_bias = 0; 
 
 //bias and forces
-  vector<float> s_input(dim_);
+  //vector<float> s_input(dim_);
   const Dim d = {dim_};
-  Expression s = input(cg_, d, &s_input);
-  Expression bias_expr = nn_.run(s,cg_);
+  Expression s = input(cg_, d, &current_S);
+  Expression s_scaled = s / (0.5*float(max_-min_));
+  Expression bias_expr = nn_.run(s_scaled);
+
+//shift the potential to the minimum
+  Expression shift = input(cg_,  &min_bias);
+  Expression bias_shift = bias_expr - shift;
 
 //get currect CVs
-  for (unsigned i=0; i<dim_; i++)
+  for(unsigned i=0; i<dim_; i++)
     current_S[i]=getArgument(i);
 
+  bool DEBUG =false;
+
+//debug
+	if (counter_ % 100 == 0 && DEBUG ) {
+	cerr << "ITER: " << iter << " - STEP: " << counter_ << endl;
+	cerr << "s\t:" << as_scalar(cg_.forward(s)) << endl; 
+  	cerr << "s'\t:" << as_scalar(cg_.forward(s_scaled)) << endl;
+  	cerr << "V(s')\t:" << as_scalar(cg_.forward(bias_expr)) << endl;
+  	}
 //propagate and backprop to get forces
   bias_pot = as_scalar(cg_.forward(bias_expr));
   cg_.backward(bias_expr,true);
@@ -230,6 +309,113 @@ void NeuralNetworkVes::calculate()
   }
   valueForceTot2->set(tot_force2);
 
+/*
+//save cv value for later
+  //old_s_[counter_++] = s_input;
+  old_s_[counter_++] = current_S[0];
+*/
+  //accumulate gradients
+  grad_w = nn_.get_grad_w();
+  grad_b = nn_.get_grad_b();
+  sum_grad(ave_grad_w,grad_w);
+  sum_grad(ave_grad_b,grad_b);
+
+//update parameters
+  if (counter_==stride_){
+    	if (DEBUG) cerr << "iter : " << iter << endl;
+    	if (DEBUG) cerr << "old_s_vector " << endl;
+    	for (unsigned i=0; i<old_s_.size(); i++){
+      		if (DEBUG) cerr << old_s_[i] << " - ";
+    	}
+    	if (DEBUG) cerr << endl << endl;
+    iter++;
+    //compute loss function
+
+    // -- (2) target distribution
+    // open stream to print bias to file
+    ofstream biasfile;
+    string name;
+    int B_STR = 10; 
+    if( iter % B_STR == 0) {
+	name = "bias.iter-"+to_string(iter); 
+	biasfile.open(name.c_str());
+        biasfile << "#s\tV(s)" << endl;
+    }
+
+    	if (DEBUG) cerr << " -- target_dist -- " << endl;  
+    current_S[0] = s_grid[0];
+    Expression omega_t1 = nn_.run(bias_expr);
+    min_bias = as_scalar(cg_.forward( nn_.run(bias_expr )));
+    
+    cerr << "min: " << min_bias << endl; 
+    
+    for (unsigned i=1; i<s_grid.size(); i++){
+      current_S[0] = s_grid[i];
+      // print stuff
+      float aux_bias = as_scalar(cg_.forward(bias_expr));
+      if (aux_bias < min_bias ) min_bias = aux_bias;
+//      if( iter % B_STR == 0) biasfile << current_S[0] << "\t" << aux_bias << endl;
+      omega_t1= omega_t1 + nn_.run(bias_expr);
+      	if (DEBUG) cerr << i << " | omega " << as_scalar(cg_.forward(omega_t1)) << endl;
+    }
+
+    current_S[0] = s_grid[0];
+    Expression omega_t = nn_.run(bias_shift);
+    for (unsigned i=1; i<s_grid.size(); i++){
+      current_S[0] = s_grid[i];
+      if( iter % B_STR == 0) biasfile << current_S[0] << "\t" << as_scalar(cg_.forward(bias_shift)) << endl;
+      omega_t = omega_t + nn_.run(bias_shift);
+    }
+
+    //close printing
+    if( iter % B_STR == 0) biasfile.close();
+
+    omega_t = omega_t * (ds_);
+    	if (DEBUG) cerr << " normalize " << as_scalar(cg_.forward(omega_t)) << endl;
+
+    float aux_omega_t = as_scalar( cg_.forward(omega_t) );
+    cg_.backward(omega_t);
+    valueOmegaTarget->set( aux_omega_t );   
+
+    //(1) biased term
+    current_S[0] = old_s_[0];					//update input	
+    Expression av_exp_bias = dynet::exp(bias_shift*beta_);	//exp(beta*V(s_i))
+    Expression omega = av_exp_bias;				
+    for (unsigned i=1; i<stride_; i++){
+      current_S[0]=old_s_[i];
+      omega = omega + av_exp_bias;				//sum_i exp(beta*V(s_i))
+      	if (DEBUG) cerr << i << " | curr_S: " << current_S[0] << "\te(bv)\t:" << as_scalar(cg_.forward(av_exp_bias)) << "\t--> omega\t" << as_scalar(cg_.forward(omega))   << endl;
+    }
+    	if (DEBUG) cerr << "done" << endl;
+
+    omega = omega * (1/stride_);
+    	if (DEBUG) cerr << " normalize " << as_scalar(cg_.forward(omega)) << endl;
+    omega = dynet::log(omega);					//omega = -1/beta * ln (sum_i ...)
+    	if (DEBUG) cerr << " log " << as_scalar(cg_.forward(omega)) << endl;
+    omega = omega * (-1./beta_);
+    	if (DEBUG) cerr << " -1/beta " << as_scalar(cg_.forward(omega)) << endl;
+    
+    	if (DEBUG) cerr << "setting things.. " << endl;
+    	if (DEBUG) cerr << "omega" << endl;
+    float aux_omega_bias = as_scalar( cg_.forward(omega) );
+    	if (DEBUG) cerr << "backward" << endl;
+    cg_.backward(omega);
+    	if (DEBUG) cerr << "exporting value" << endl;
+    valueOmegaBias->set( aux_omega_bias );
+    	if (DEBUG) cerr << "ok" << endl;
+
+
+    //sum contributions and update 
+    valueOmega->set( aux_omega_bias + aux_omega_t );
+    //cg_.backward(omega);
+    trainer_->update();
+
+    //const Dim d_stride = {stride_};
+    //Expression av_bias = input(cg_, d_stride, &old_bias);
+    //Expression av_exp_bias =   
+    
+    counter_=0;
+  }
 /*
 //get CVs, update bias and set forces
   double bias_pot=0;
