@@ -267,6 +267,8 @@ PLUMED_CONFIG_ENABLE([python],[search for python],[yes])
 PLUMED_CONFIG_ENABLE([af_ocl],[arrayfire_opencl],[search for arrayfire],[no])
 PLUMED_CONFIG_ENABLE([af_cuda],[arrayfire_cuda],[search for arrayfire],[no])
 PLUMED_CONFIG_ENABLE([af_cpu],[arrayfire_cpu],[search for arrayfire],[no])
+# libtorch
+PLUMED_CONFIG_ENABLE([libtorch],[search for libtorch],[yes])
 
 AC_ARG_VAR(SOEXT,[extension of dynamic libraries (so/dylib)])
 AC_ARG_VAR(STATIC_LIBS,[variables that should be linked statically directly to MD code - configure will add here -ldl if necessary ])
@@ -346,6 +348,14 @@ fi
 if test $debug == true
 then
   PLUMED_CHECK_CXXFLAG([-g])
+fi
+
+#libtorch
+if test $libtorch == true
+then
+  PLUMED_CHECK_CXXFLAG([-ltorch])
+  PLUMED_CHECK_CXXFLAG([-lcaffe2])
+  PLUMED_CHECK_CXXFLAG([-lc10])
 fi
 
 if test $gcov == true
@@ -793,6 +803,19 @@ if test "$af_cuda" == true ; then
 fi
 if test "$af_cpu" == true ; then
   PLUMED_CHECK_PACKAGE([arrayfire.h],[af_is_double],[__PLUMED_HAS_ARRAYFIRE],[afcpu])
+fi
+
+#libtorch
+if test $libtorch == true ; then
+  PLUMED_CHECK_CXX_PACKAGE([libtorch],[
+#include <torch/torch.h>
+#include <iostream>
+int main() {
+  torch::Tensor tensor = torch::rand({2, 3});
+  std::cout << tensor << std::endl;
+  return 0;
+}
+  ], [__PLUMED_HAS_LIBTORCH], [libtorch])
 fi
 
 # in non-debug mode, add -DNDEBUG
