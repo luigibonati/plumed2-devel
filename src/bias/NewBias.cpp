@@ -1,5 +1,3 @@
-#ifdef __PLUMED_HAS_LIBTORCH
-
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
    Copyright (c) 2012-2018 The plumed team
    (see the PEOPLE file at the root of the distribution for a list of names)
@@ -85,7 +83,7 @@ public:
   static void registerKeywords(Keywords& keys);
 };
 
-PLUMED_REGISTER_ACTION(NewBias,"NEWBIAS")
+PLUMED_REGISTER_ACTION(NewBias,"NEW_BIAS")
 
 void NewBias::registerKeywords(Keywords& keys) {
   Bias::registerKeywords(keys);
@@ -125,4 +123,3 @@ void NewBias::calculate() {
 }
 
 
-#endif
