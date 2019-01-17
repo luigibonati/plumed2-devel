@@ -59,6 +59,15 @@ std::vector<float> tensor_to_vector(const torch::Tensor& x) {
 float tensor_to_scalar(const torch::Tensor& x){
     return x.item<float>();
 }
+// exp_added(expsum,expvalue)
+// expsum=log(exp(expsum)+exp(expvalue)
+inline void exp_added(double& expsum,double expvalue)
+{
+    if(expsum>expvalue)
+	expsum=expsum+std::log(1.0+exp(expvalue-expsum));
+    else
+	expsum=expvalue+std::log(1.0+exp(expsum-expvalue));
+}
 
 struct Net : torch::nn::Module {
   Net( vector<int> nodes, bool periodic ) : _layers() {
@@ -133,7 +142,7 @@ private:
   float 		t_min, t_max; 
   float 		t_ds;
   int 			t_nbins;
-  vector<float> 	t_grid,t_target;
+  vector<float> 	t_grid,t_target,t_bias_hist;
 /*--reweight--*/
   float 		r_ct; 
   float 		r_bias;
@@ -143,9 +152,9 @@ private:
   vector<vector<float>>	g_target;
   vector<torch::Tensor> g_tensor;
 /*--outputvalues--*/
-  Value*		v_Omega;
-  Value*		v_OmegaBias;
-  Value*		v_OmegaTarget;
+  Value*		v_kl;
+  Value*		v_rct;
+  Value*		v_rbias;
   Value*		v_ForceTot2;
 /*--methods-*/
   void 			update_coeffs();
@@ -177,9 +186,9 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
                           "these quantities will named with  the arguments of the bias followed by "
                           "the character string _bias. These quantities tell the user how much the bias is "
                           "due to each of the colvars.");
-  keys.addOutputComponent("omega","default","estimate of the omega functional");
-  keys.addOutputComponent("rct","default","estimate of the omega functional");
-  keys.addOutputComponent("rbias","default","estimate of the omega functional");
+  keys.addOutputComponent("kl","default","kl divergence between bias and target");
+  keys.addOutputComponent("rct","default","c(t) term");
+  keys.addOutputComponent("rbias","default","bias-c(t)");
   keys.addOutputComponent("force2","default","total force");
 }
 
@@ -188,12 +197,14 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
 {
   //for debugging TODO remove
   torch::manual_seed(0);
+
   /*--NN OPTIONS--*/
   //get # of inputs (CVs)
   nn_input_dim=getNumberOfArguments();
   //parse the NN architecture
   parseVector("NODES",nn_nodes);
   //todo: check dim_ and first dimension
+
   /*--TEMPERATURE--*/  
   double temp=0;
   parse("TEMP",temp);
@@ -204,6 +215,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
     plumed_massert(KbT>0,"your MD engine does not pass the temperature to plumed, you must specify it using TEMP");
   }
   o_beta=1.0/KbT; //remember: with LJ use NATURAL UNITS
+
   /*--TARGET DISTRIBUTION--*/
   // range 
   vector<float> range;
@@ -222,8 +234,11 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   //define target distribution (UNIFORM)
   t_target.resize(t_nbins);
   for (auto&& t : t_target)
-    //t = 1/fabs(t_max-t_min); 
+    t = 1/fabs(t_max-t_min); 
     //t = 1./t_nbins;			//WARNING
+  //define histogram for computing biased distribution
+  t_bias_hist.resize(t_nbins);
+  std::fill(t_bias_hist.begin(), t_bias_hist.end(), 0.000001);
   /*--PARAMETERS--*/
   // update stride
   o_stride=500;
@@ -243,8 +258,10 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   o_periodic=getPntrToArgument(0)->isPeriodic();
    // reset counters
   c_iter=0;
+
   /*--PARSING DONE --*/
   checkRead();
+
   /*--NEURAL NETWORK SETUP --*/
   log.printf("  Defining neural network with %d layers",nn_nodes.size() );
   //nn_model = new Net (nn_nodes, o_periodic);
@@ -257,8 +274,8 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   vector<torch::Tensor> params = nn_model->parameters();
   torch::Tensor y = nn_model->forward( torch::rand({1}).view({1,nn_input_dim}) );
   y.backward();
-  nn_opt->zero_grad();
   //Define auxiliary vectors to store gradients
+  nn_opt->zero_grad();
   for (auto&& p : params ){
     cout << p << endl;
     vector<float> gg = tensor_to_vector( p.grad() );
@@ -267,15 +284,17 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
     g_target.push_back(gg);
     g_tensor.push_back(p);
   }
+
   /*--SET OUTPUT COMPONENTS--*/
   addComponent("force2"); componentIsNotPeriodic("force2");
   v_ForceTot2=getPntrToComponent("force2");
-  addComponent("omega"); componentIsNotPeriodic("omega");
-  v_Omega=getPntrToComponent("omega");
-  addComponent("omegaBias"); componentIsNotPeriodic("omegaBias");
-  v_OmegaBias=getPntrToComponent("omegaBias");
-  addComponent("omegaTarget"); componentIsNotPeriodic("omegaTarget");
-  v_OmegaTarget=getPntrToComponent("omegaTarget");
+  addComponent("kl"); componentIsNotPeriodic("kl");
+  v_kl=getPntrToComponent("kl");
+  addComponent("rct"); componentIsNotPeriodic("rct");
+  v_rct=getPntrToComponent("rct");
+  addComponent("rbias"); componentIsNotPeriodic("rbias");
+  v_rbias=getPntrToComponent("rbias");
+
   /*--LOG INFO--*/
   log.printf("  Inputs: %d\n",nn_input_dim);
   log.printf("  Temperature T: %g\n",1./(Kb*o_beta));
@@ -309,7 +328,7 @@ void NeuralNetworkVes::calculate() {
   //set forces
   for (unsigned i=0; i<nn_input_dim; i++){
     tot_force2+=pow(force[i],2);
-    setOutputForce(i,-force[i]);
+    setOutputForce(i,-force[i]); //be careful of minus sign
   }
   v_ForceTot2->set(tot_force2);
   //accumulate gradients
@@ -318,7 +337,11 @@ void NeuralNetworkVes::calculate() {
     vector<float> gg = tensor_to_vector( p[i].grad() );
     g_mean[i] = g_mean[i] + gg;
   }
-
+  //accumulate histogram for biased distribution TODO grid more than 1cv
+  int idx=(current_S[0]-t_min)/t_ds;
+  if(idx>=t_nbins) idx=t_nbins-1;
+  if(idx<0) idx=0;
+  t_bias_hist[idx]++;
   /*--UPDATE PARAMETERS--*/
   if(getStep()%o_stride==0){
     c_iter++; 
@@ -334,14 +357,14 @@ void NeuralNetworkVes::calculate() {
       g_mean[i] = -(1./o_stride) * g_mean[i];
 
     /**Target distribution contribution**/
-/*
+    vector<float> bias_grid (t_nbins);
     for (unsigned i=0; i<t_grid.size(); i++){
       //scan over grid
       current_S[0] = t_grid[i];
       torch::Tensor input_S_target = torch::tensor(current_S).view({1,nn_input_dim});
       nn_opt->zero_grad();
       output = nn_model->forward( input_S_target );
-      bias_pot = output.item<float>();
+      bias_grid[i] = output.item<float>();
       output.backward();
       p = nn_model->parameters();
       for (unsigned i=0; i<p.size(); i++){
@@ -350,10 +373,10 @@ void NeuralNetworkVes::calculate() {
         g_target[i] = g_target[i] + gg;
       }
       //print bias on file
-      if( c_iter % o_print == 0) biasfile << current_S[0] << "\t" << bias_pot << endl;
+      if( c_iter % o_print == 0) biasfile << current_S[0] << "\t" << bias_grid[i] << endl;
     }
-*/
-    /**alternative with minibatch**/
+    /**alternative with minibatch**/ //be careful about target distribution normalization
+/*
     torch::Tensor batch_S = torch::tensor(t_grid).view({t_nbins,nn_input_dim});    
     nn_opt->zero_grad();
     output = nn_model->forward( batch_S );
@@ -368,11 +391,14 @@ void NeuralNetworkVes::calculate() {
     if( c_iter % o_print == 0)
       for(int i=0; i<t_grid.size(); i++)
 	biasfile << t_grid[i] << "\t" << bias_grid[i] << endl;
+*/
     //reset gradients
     nn_opt->zero_grad();
     //normalize target gradient (if different from uniform) TODO
-    //for (unsigned i=0; i<g_target.size(); i++)
-    //  g_target[i] = ( (t_max-t_min)/t_nbins ) * g_target[i];
+    for (unsigned i=0; i<g_target.size(); i++)
+      //g_target[i] = (t_max-t_min) * g_target[i];
+      g_target[i] = ( (t_max-t_min)/t_nbins ) * g_target[i]; // if not using minibatch
+
     //close the ostream
     if( c_iter % o_print == 0) biasfile.close(); 
     /**Assign new gradient and update coefficients**/
@@ -390,6 +416,35 @@ void NeuralNetworkVes::calculate() {
       }
       //update the parameters
       nn_opt->step();
+
+    /*--COMPUTE REWEIGHT FACTOR--*/ 
+    double log_sumebv=-1.0e38;
+    double rw_norm=0;
+    //loop over grid
+    for (unsigned i=0; i<t_grid.size(); i++){
+      double log_target = std::log(t_target[i]);	        //log [ p(s) * (b-a)/nbins ]
+      double log_ebv= o_beta * bias_grid[i] + log_target;     	//beta*V(s)+log p(s)
+      if(i==0) log_sumebv = log_ebv;				//sum exp with previous ones (see func. exp_added)
+      else exp_added(log_sumebv,log_ebv);
+      rw_norm += t_target[i];
+    }
+    //compute c(t)
+    r_ct = (log_sumebv-std::log(rw_norm))/o_beta;
+    getPntrToComponent("rct")->set(r_ct); 
+    //compute rbias
+    r_bias = bias_pot-r_ct;
+    getPntrToComponent("rbias")->set(r_bias);
+
+    //--COMPUTE KL--
+    //normalize bias histogram   
+    t_bias_hist = (1./o_stride * t_nbins/(t_max-t_min)) * t_bias_hist;
+    //compute kl
+    double kl=0;
+    for (unsigned i=0; i<t_target.size(); i++)
+      kl+=t_bias_hist[i]*std::log(t_bias_hist[i]/t_target[i]);
+    getPntrToComponent("kl")->set(kl);
+    std::fill(t_bias_hist.begin(), t_bias_hist.end(), 0.000001);
+
   }
 }
 
