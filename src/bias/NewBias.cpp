@@ -130,11 +130,13 @@ private:
   shared_ptr<Net>	nn_model;
   shared_ptr<torch::optim::Adam> nn_opt; //TODO generalize optimizer
 /*--parameters and options--*/
-  double 		o_beta;
+  float 		o_beta;
   int	 		o_stride;
   int	 		o_print;
+  int			o_target;
   int 			o_tau;
-  double 		o_lrate;
+  float 		o_lrate;
+  float			o_gamma;
   bool			o_periodic; //TODO: PARSE PERIODIC CVs and pass it as an array of booleans 
 /*--counters--*/
   int			c_iter;
@@ -142,7 +144,7 @@ private:
   float 		t_min, t_max; 
   float 		t_ds;
   int 			t_nbins;
-  vector<float> 	t_grid,t_target,t_bias_hist;
+  vector<float> 	t_grid,t_target,t_bias_hist,t_fes;
 /*--reweight--*/
   float 		r_ct; 
   float 		r_bias;
@@ -175,10 +177,12 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
   keys.add("compulsory","RANGE","min and max of the range allowed");
   keys.add("optional","NBINS","bins for target distro");
   keys.add("optional","TEMP","temperature of the simulation");
-  keys.add("optional","TAU","exponentially decaying average");
+  keys.add("optional","TAU","exponentially decaying average for KL");
   keys.add("optional","LRATE","the step used for the minimization of the functional");
+  keys.add("optional","GAMMA","gamma value for well-tempered distribution");
   keys.add("optional","AVE_STRIDE","the stride for the update of the bias");
   keys.add("optional","PRINT_STRIDE","the stride for printing the bias (iterations)");
+  keys.add("optional","TARGET_STRIDE","the stride for updating the iterations (iterations)");
    componentsAreNotOptional(keys);
   useCustomisableComponents(keys); //needed to have an unknown number of components
   // Should be _bias below
@@ -239,24 +243,34 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   //define histogram for computing biased distribution
   t_bias_hist.resize(t_nbins);
   std::fill(t_bias_hist.begin(), t_bias_hist.end(), 0.000001);
+  //define grid for fes
+  t_fes.resize(t_nbins);
+  std::fill(t_fes.begin(), t_fes.end(), 0.);
   /*--PARAMETERS--*/
   // update stride
   o_stride=500;
   parse("AVE_STRIDE",o_stride);
- // update stride
+ // print stride
   o_print=1000;
   parse("PRINT_STRIDE",o_print);
- // check whether to use an exponentially decaying average
-  o_tau=0;
+ // update stride
+  o_target=100;
+  parse("TARGET_STRIDE",o_target);
+ 
+  // check whether to use an exponentially decaying average for the calculation of KL
+  o_tau=1;
   parse("TAU",o_tau);
   if (o_tau>0)
     o_tau*=o_stride;
   // parse learning rate
   o_lrate=0.001;
-  parse("LRATE",o_lrate);
+  parse("LRATE",o_lrate); 
+  // parse gamma
+  o_gamma=0;
+  parse("GAMMA",o_gamma);
   // check if args are periodic TODO IMPROVE TO DEAL WITH MORE CVs
   o_periodic=getPntrToArgument(0)->isPeriodic();
-   // reset counters
+  // reset counters
   c_iter=0;
 
   /*--PARSING DONE --*/
@@ -268,7 +282,10 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   nn_model = make_shared<Net>(nn_nodes, o_periodic);
   //normalize setup TODO integrate this in a seamless way
   nn_model->setRange(t_min, t_max);
-  nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), /*lr=*/o_lrate );
+  //nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), /*lr=*/o_lrate);
+  torch::optim::AdamOptions opt(o_lrate);
+  opt.amsgrad(true);
+  nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), opt);
   /*--CREATE AUXILIARY VECTORS--*/
   //dummy backward pass in order to have the grads defined
   vector<torch::Tensor> params = nn_model->parameters();
@@ -277,7 +294,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   //Define auxiliary vectors to store gradients
   nn_opt->zero_grad();
   for (auto&& p : params ){
-    cout << p << endl;
+    //cout << p << endl;
     vector<float> gg = tensor_to_vector( p.grad() );
     g_.push_back(gg);
     g_mean.push_back(gg);
@@ -339,9 +356,15 @@ void NeuralNetworkVes::calculate() {
   }
   //accumulate histogram for biased distribution TODO grid more than 1cv
   int idx=(current_S[0]-t_min)/t_ds;
+    //check if outside the grid TODO crash?
   if(idx>=t_nbins) idx=t_nbins-1;
   if(idx<0) idx=0;
-  t_bias_hist[idx]++;
+  //t_bias_hist[idx]++;
+    //get current weight
+  float weight=getStep()+1;
+  if (o_tau>0 && weight>o_tau)
+    weight=o_tau;
+  t_bias_hist[idx]+=1./weight;
   /*--UPDATE PARAMETERS--*/
   if(getStep()%o_stride==0){
     c_iter++; 
@@ -374,6 +397,8 @@ void NeuralNetworkVes::calculate() {
       }
       //print bias on file
       if( c_iter % o_print == 0) biasfile << current_S[0] << "\t" << bias_grid[i] << endl;
+
+      
     }
     /**alternative with minibatch**/ //be careful about target distribution normalization
 /*
@@ -396,8 +421,8 @@ void NeuralNetworkVes::calculate() {
     nn_opt->zero_grad();
     //normalize target gradient (if different from uniform) TODO
     for (unsigned i=0; i<g_target.size(); i++)
-      //g_target[i] = (t_max-t_min) * g_target[i];
       g_target[i] = ( (t_max-t_min)/t_nbins ) * g_target[i]; // if not using minibatch
+      //g_target[i] = (t_max-t_min) * g_target[i];
 
     //close the ostream
     if( c_iter % o_print == 0) biasfile.close(); 
@@ -405,6 +430,14 @@ void NeuralNetworkVes::calculate() {
     for (unsigned i=0; i<g_.size()-1; i++){  //until size-1 since we do not want to update the bias of the output layer
 	//bias-target
 	g_[i]=g_mean[i]+g_target[i];
+if(i == g_.size()-2) { 
+    float nn1=0,nn2=0;
+    for (auto& n : g_mean[i])
+      nn1 += n;
+    for (auto& n : g_target[i])
+      nn2 += n;
+   
+}
         //vector to Tensor
         g_tensor[i] = torch::tensor(g_[i]).view( nn_model->parameters()[i].sizes() );
         //assign tensor to derivatives
@@ -419,33 +452,62 @@ void NeuralNetworkVes::calculate() {
 
     /*--COMPUTE REWEIGHT FACTOR--*/ 
     double log_sumebv=-1.0e38;
-    double rw_norm=0;
+    double target_norm=0;
     //loop over grid
     for (unsigned i=0; i<t_grid.size(); i++){
       double log_target = std::log(t_target[i]);	        //log [ p(s) * (b-a)/nbins ]
       double log_ebv= o_beta * bias_grid[i] + log_target;     	//beta*V(s)+log p(s)
       if(i==0) log_sumebv = log_ebv;				//sum exp with previous ones (see func. exp_added)
       else exp_added(log_sumebv,log_ebv);
-      rw_norm += t_target[i];
+      target_norm += t_target[i];
     }
     //compute c(t)
-    r_ct = (log_sumebv-std::log(rw_norm))/o_beta;
+    r_ct = (log_sumebv-std::log(target_norm))/o_beta;
     getPntrToComponent("rct")->set(r_ct); 
     //compute rbias
     r_bias = bias_pot-r_ct;
     getPntrToComponent("rbias")->set(r_bias);
 
     //--COMPUTE KL--
-    //normalize bias histogram   
-    t_bias_hist = (1./o_stride * t_nbins/(t_max-t_min)) * t_bias_hist;
+    //normalize bias histogram
+    double bias_norm=0;
+    for (auto& n : t_bias_hist)
+      bias_norm += n;
+    //t_bias_hist = (t_nbins/(t_max-t_min)) * t_bias_hist;
+    //t_bias_hist = (1./sum * t_nbins/(t_max-t_min)) * t_bias_hist;
+    //t_bias_hist = (1./o_stride * t_nbins/(t_max-t_min)) * t_bias_hist;
+    //normalize distributions
+    auto biased_dist = (1./bias_norm) * t_bias_hist;
+    auto target_dist = (1./target_norm) * t_target;
     //compute kl
     double kl=0;
-    for (unsigned i=0; i<t_target.size(); i++)
-      kl+=t_bias_hist[i]*std::log(t_bias_hist[i]/t_target[i]);
+    for (unsigned i=0; i<target_dist.size(); i++)
+      kl+=biased_dist[i]*std::log(biased_dist[i]/target_dist[i]);
     getPntrToComponent("kl")->set(kl);
-    std::fill(t_bias_hist.begin(), t_bias_hist.end(), 0.000001);
+    //std::fill(t_bias_hist.begin(), t_bias_hist.end(), 0.000001);
 
-  }
+    /*--UPDATE TARGET DISTRIBUTION--*/ 
+    double new_target_norm=0;
+    if(o_target > 0 && c_iter % o_target == 0 && c_iter>0){
+      //compute new estimate of the fes
+      for (unsigned i=0; i<t_fes.size(); i++){
+        t_fes[i] = - bias_grid[i] - 1./o_gamma * t_fes[i];
+        double exp_beta_F = std::exp(-o_beta/o_gamma * t_fes[i]); 
+	new_target_norm += exp_beta_F;
+        t_target[i] = exp_beta_F;
+      }
+      t_target = (1./new_target_norm/(t_max-t_min)*t_nbins) * t_target;
+     
+      ofstream file;
+      if( c_iter % o_print == 0){
+        file.open(("info.iter-"+to_string(c_iter)).c_str());
+        for(unsigned i=0; i<t_fes.size(); i++)
+          if( c_iter % o_print == 0) file << t_grid[i] << "\t" << bias_grid[i] << "\t" << t_fes[i] << "\t" << t_target[i] << endl;
+	file.close();
+      }
+    }  
+
+ }
 }
 
 }
