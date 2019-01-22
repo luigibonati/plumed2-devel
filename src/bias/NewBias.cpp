@@ -238,8 +238,8 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   //define target distribution (UNIFORM)
   t_target.resize(t_nbins);
   for (auto&& t : t_target)
-    t = 1/fabs(t_max-t_min); 
-    //t = 1./t_nbins;			//WARNING
+    t = 1./t_nbins;			//normalize such that sum goes to 1
+    //t = 1/fabs(t_max-t_min); 
   //define histogram for computing biased distribution
   t_bias_hist.resize(t_nbins);
   std::fill(t_bias_hist.begin(), t_bias_hist.end(), 0.000001);
@@ -258,7 +258,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   parse("TARGET_STRIDE",o_target);
  
   // check whether to use an exponentially decaying average for the calculation of KL
-  o_tau=1;
+  o_tau=0;
   parse("TAU",o_tau);
   if (o_tau>0)
     o_tau*=o_stride;
@@ -284,7 +284,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   nn_model->setRange(t_min, t_max);
   //nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), /*lr=*/o_lrate);
   torch::optim::AdamOptions opt(o_lrate);
-  opt.amsgrad(true);
+  //opt.amsgrad(true);
   nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), opt);
   /*--CREATE AUXILIARY VECTORS--*/
   //dummy backward pass in order to have the grads defined
@@ -317,8 +317,8 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   log.printf("  Temperature T: %g\n",1./(Kb*o_beta));
   log.printf("  Beta (1/Kb*T): %g\n",o_beta);
   log.printf("  Stride for the ensemble average: %d\n",o_stride);
-  log.printf("  Learning Rate: %d\n",o_lrate);
-  if (o_tau>1)
+  log.printf("  Learning Rate: %g\n",o_lrate);
+  if (o_tau>0)
     log.printf("  Exponentially decaying average with weight=tau*stride=%d\n",o_tau);
   // TODO:add nn and opt info
 }
@@ -397,9 +397,16 @@ void NeuralNetworkVes::calculate() {
       }
       //print bias on file
       if( c_iter % o_print == 0) biasfile << current_S[0] << "\t" << bias_grid[i] << endl;
-
-      
     }
+
+    //shift bias to zero
+/*
+    auto min = *std::min_element(bias_grid.begin(), bias_grid.end());
+    auto p = nn_model->parameters();
+    p[p.size()-1]=torch::tensor(-min);
+    for (unsigned i=0; i<bias_grid.size(); i++)
+      bias_grid[i]-=min;
+*/ 
     /**alternative with minibatch**/ //be careful about target distribution normalization
 /*
     torch::Tensor batch_S = torch::tensor(t_grid).view({t_nbins,nn_input_dim});    
@@ -419,9 +426,9 @@ void NeuralNetworkVes::calculate() {
 */
     //reset gradients
     nn_opt->zero_grad();
-    //normalize target gradient (if different from uniform) TODO
-    for (unsigned i=0; i<g_target.size(); i++)
-      g_target[i] = ( (t_max-t_min)/t_nbins ) * g_target[i]; // if not using minibatch
+    //normalize target gradient (if different from uniform) TODO or maybe not normalize at all?
+    //for (unsigned i=0; i<g_target.size(); i++)
+    // g_target[i] = ( (t_max-t_min)/t_nbins ) * g_target[i]; // if not using minibatch
       //g_target[i] = (t_max-t_min) * g_target[i];
 
     //close the ostream
@@ -430,14 +437,6 @@ void NeuralNetworkVes::calculate() {
     for (unsigned i=0; i<g_.size()-1; i++){  //until size-1 since we do not want to update the bias of the output layer
 	//bias-target
 	g_[i]=g_mean[i]+g_target[i];
-if(i == g_.size()-2) { 
-    float nn1=0,nn2=0;
-    for (auto& n : g_mean[i])
-      nn1 += n;
-    for (auto& n : g_target[i])
-      nn2 += n;
-   
-}
         //vector to Tensor
         g_tensor[i] = torch::tensor(g_[i]).view( nn_model->parameters()[i].sizes() );
         //assign tensor to derivatives
@@ -447,15 +446,15 @@ if(i == g_.size()-2) {
         std::fill(g_mean[i].begin(), g_mean[i].end(), 0.);
         std::fill(g_target[i].begin(), g_target[i].end(), 0.);
       }
-      //update the parameters
-      nn_opt->step();
+    //update the parameters
+    //nn_opt->step();
 
     /*--COMPUTE REWEIGHT FACTOR--*/ 
     double log_sumebv=-1.0e38;
     double target_norm=0;
     //loop over grid
     for (unsigned i=0; i<t_grid.size(); i++){
-      double log_target = std::log(t_target[i]);	        //log [ p(s) * (b-a)/nbins ]
+      double log_target = std::log(t_target[i]);	        
       double log_ebv= o_beta * bias_grid[i] + log_target;     	//beta*V(s)+log p(s)
       if(i==0) log_sumebv = log_ebv;				//sum exp with previous ones (see func. exp_added)
       else exp_added(log_sumebv,log_ebv);
@@ -487,17 +486,18 @@ if(i == g_.size()-2) {
     //std::fill(t_bias_hist.begin(), t_bias_hist.end(), 0.000001);
 
     /*--UPDATE TARGET DISTRIBUTION--*/ 
-    double new_target_norm=0;
-    if(o_target > 0 && c_iter % o_target == 0 && c_iter>0){
+    float sum_exp_beta_F = 0;
+    if(o_target > 0 && c_iter % o_target == 0){
       //compute new estimate of the fes
       for (unsigned i=0; i<t_fes.size(); i++){
-        t_fes[i] = - bias_grid[i] - 1./o_gamma * t_fes[i];
-        double exp_beta_F = std::exp(-o_beta/o_gamma * t_fes[i]); 
-	new_target_norm += exp_beta_F;
+        t_fes[i] = - bias_grid[i] + 1./o_gamma * t_fes[i];
+        float exp_beta_F = std::exp(- o_beta/o_gamma * t_fes[i]); 
+	sum_exp_beta_F += exp_beta_F;
         t_target[i] = exp_beta_F;
       }
-      t_target = (1./new_target_norm/(t_max-t_min)*t_nbins) * t_target;
-     
+      t_target = (1./sum_exp_beta_F) * t_target;
+      //t_target = (1./new_target_norm/(t_max-t_min)*t_nbins) * t_target;
+
       ofstream file;
       if( c_iter % o_print == 0){
         file.open(("info.iter-"+to_string(c_iter)).c_str());
@@ -506,7 +506,8 @@ if(i == g_.size()-2) {
 	file.close();
       }
     }  
-
+    //update parameters
+    nn_opt->step();
  }
 }
 
