@@ -490,8 +490,8 @@ void NeuralNetworkVes::calculate() {
     if(o_target > 0 && c_iter % o_target == 0){
       //compute new estimate of the fes
       for (unsigned i=0; i<t_fes.size(); i++){
-        t_fes[i] = - bias_grid[i] + 1./o_gamma * t_fes[i];
-        float exp_beta_F = std::exp(- o_beta/o_gamma * t_fes[i]); 
+        t_fes[i] = - bias_grid[i] + (1./o_gamma) * t_fes[i];
+        float exp_beta_F = std::exp( (-o_beta/o_gamma) * t_fes[i]); 
 	sum_exp_beta_F += exp_beta_F;
         t_target[i] = exp_beta_F;
       }

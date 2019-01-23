@@ -745,7 +745,6 @@ enable_python
 enable_af_ocl
 enable_af_cuda
 enable_af_cpu
-enable_libtorch
 enable_openmp
 '
       ac_precious_vars='build_alias
@@ -1455,7 +1454,6 @@ Optional Features:
                           arrayfire
   --enable-af_cuda        enable arrayfire_cuda, default: search for arrayfire
   --enable-af_cpu         enable arrayfire_cpu, default: search for arrayfire
-  --enable-libtorch       enable search for libtorch, default: yes
   --disable-openmp        do not use OpenMP
 
 Some influential environment variables:
@@ -3264,25 +3262,6 @@ else
 fi
 
 
-# libtorch
-
-libtorch=
-# Check whether --enable-libtorch was given.
-if test "${enable_libtorch+set}" = set; then :
-  enableval=$enable_libtorch; case "${enableval}" in
-             (yes) libtorch=true ;;
-             (no)  libtorch=false ;;
-             (*)   as_fn_error $? "wrong argument to --enable-libtorch" "$LINENO" 5 ;;
-  esac
-else
-  case "yes" in
-             (yes) libtorch=true ;;
-             (no)  libtorch=false ;;
-  esac
-
-fi
-
-
 
 
 
@@ -4682,149 +4661,6 @@ then
   CXXFLAGS="$CXXFLAGS -g"
   { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CXX accepts -g" >&5
 $as_echo_n "checking whether $CXX accepts -g... " >&6; }
-  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-int
-main ()
-{
-
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_cxx_try_compile "$LINENO"; then :
-
-      cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-int
-main ()
-{
-
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_cxx_try_link "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
-$as_echo "yes" >&6; }
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: not linking" >&5
-$as_echo "not linking" >&6; }; CXXFLAGS="$save_CXXFLAGS"
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }; CXXFLAGS="$save_CXXFLAGS"
-
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
-
-fi
-
-#libtorch
-if test $libtorch == true
-then
-
-  save_CXXFLAGS="$CXXFLAGS"
-  CXXFLAGS="$CXXFLAGS -ltorch"
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CXX accepts -ltorch" >&5
-$as_echo_n "checking whether $CXX accepts -ltorch... " >&6; }
-  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-int
-main ()
-{
-
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_cxx_try_compile "$LINENO"; then :
-
-      cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-int
-main ()
-{
-
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_cxx_try_link "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
-$as_echo "yes" >&6; }
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: not linking" >&5
-$as_echo "not linking" >&6; }; CXXFLAGS="$save_CXXFLAGS"
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }; CXXFLAGS="$save_CXXFLAGS"
-
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
-
-
-  save_CXXFLAGS="$CXXFLAGS"
-  CXXFLAGS="$CXXFLAGS -lcaffe2"
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CXX accepts -lcaffe2" >&5
-$as_echo_n "checking whether $CXX accepts -lcaffe2... " >&6; }
-  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-int
-main ()
-{
-
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_cxx_try_compile "$LINENO"; then :
-
-      cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-int
-main ()
-{
-
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_cxx_try_link "$LINENO"; then :
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
-$as_echo "yes" >&6; }
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: not linking" >&5
-$as_echo "not linking" >&6; }; CXXFLAGS="$save_CXXFLAGS"
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }; CXXFLAGS="$save_CXXFLAGS"
-
-fi
-rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
-
-
-  save_CXXFLAGS="$CXXFLAGS"
-  CXXFLAGS="$CXXFLAGS -lc10"
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CXX accepts -lc10" >&5
-$as_echo_n "checking whether $CXX accepts -lc10... " >&6; }
   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
@@ -9378,67 +9214,6 @@ fi
     else
        { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: cannot enable __PLUMED_HAS_ARRAYFIRE" >&5
 $as_echo "$as_me: WARNING: cannot enable __PLUMED_HAS_ARRAYFIRE" >&2;}
-    fi
-
-fi
-
-#libtorch
-if test $libtorch == true ; then
-
-    found=ko
-    __PLUMED_HAS_LIBTORCH=no
-    if test "${libsearch}" == true ; then
-      testlibs="libtorch"
-    else
-      testlibs=""
-    fi
-    for testlib in "" $testlibs
-    do
-      save_LIBS="$LIBS"
-      if test -n "$testlib" ; then
-        { $as_echo "$as_me:${as_lineno-$LINENO}: checking libtorch with -l$testlib" >&5
-$as_echo_n "checking libtorch with -l$testlib... " >&6; }
-        LIBS="-l$testlib $LIBS"
-      else
-        { $as_echo "$as_me:${as_lineno-$LINENO}: checking libtorch without extra libs" >&5
-$as_echo_n "checking libtorch without extra libs... " >&6; }
-      fi
-      cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-#include <torch/torch.h>
-#include <iostream>
-int main() {
-  torch::Tensor tensor = torch::rand({2, 3});
-  std::cout << tensor << std::endl;
-  return 0;
-}
-
-_ACEOF
-if ac_fn_cxx_try_link "$LINENO"; then :
-  found=ok
-          { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
-$as_echo "yes" >&6; }
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }
-
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-      if test $found == ok ; then
-        break
-      fi
-      LIBS="$save_LIBS"
-    done
-    if test $found == ok ; then
-      $as_echo "#define __PLUMED_HAS_LIBTORCH 1" >>confdefs.h
-
-      __PLUMED_HAS_LIBTORCH=yes
-    else
-      { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: cannot enable __PLUMED_HAS_LIBTORCH" >&5
-$as_echo "$as_me: WARNING: cannot enable __PLUMED_HAS_LIBTORCH" >&2;}
-      LIBS="$save_LIBS"
     fi
 
 fi
