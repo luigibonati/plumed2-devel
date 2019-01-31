@@ -69,14 +69,64 @@ inline void exp_added(double& expsum,double expvalue)
 	expsum=expvalue+std::log(1.0+exp(expsum-expvalue));
 }
 
+enum Activation {
+  SIGMOID, /**< `SIGMOID` : Sigmoid function \f$x\longrightarrow \frac {1} {1+e^{-x}}\f$ */
+  TANH, /**< `TANH` : Tanh function \f$x\longrightarrow \frac {1-e^{-2x}} {1+e^{-2x}}\f$ */
+  RELU, /**< `RELU` : Rectified linear unit \f$x\longrightarrow \max(0,x)\f$ */
+  ELU, /**< `ELU` :  */
+  LINEAR, /**< `LINEAR` : Identity function \f$x\longrightarrow x\f$ */
+};
+
+Activation set_activation(const std::string& a)
+{
+	if(a=="SIGMOID"||a=="sigmoid"||a=="Sigmoid")
+		return 	Activation::SIGMOID;
+	if(a=="TANH"||a=="tanh"||a=="Tanh")
+		return 	Activation::TANH;
+	if(a=="ELU"||a=="elu"||a=="Elu"||a=="eLU")
+		return 	Activation::ELU;
+	if(a=="RELU"||a=="relu"||a=="Relu"||a=="ReLU")
+		return 	Activation::RELU;
+	if(a=="LINEAR"||a=="linear"||a=="Linear")
+		return 	Activation::LINEAR;
+	std::cerr<<"ERROR! Can't recognize the activation function "+a<<std::endl;
+	exit(-1);
+}
+
+inline torch::Tensor activate(torch::Tensor x, torch::nn::Linear l, Activation f)
+{
+    switch (f) {
+    case LINEAR:
+      return l->forward(x);	
+      break;
+    case ELU:
+      return torch::elu(l->forward(x));
+      break;
+    case RELU:
+      return torch::relu(l->forward(x)); 
+      break;
+    case SIGMOID:
+      return torch::sigmoid(l->forward(x));
+      break;
+    case TANH:
+      return torch::tanh(l->forward(x));
+      break;
+    default:
+      throw std::invalid_argument("Unknown activation function");
+      break;
+    }
+}
+
 struct Net : torch::nn::Module {
-  Net( vector<int> nodes, bool periodic ) : _layers() {
+  Net( vector<int> nodes, bool periodic, std::string activ ) : _layers() {
     //get number of hidden layers 
     _hidden=nodes.size() - 2;
     //check wheter to enforce periodicity
     _periodic=periodic;
     if(_periodic)
         nodes[0] *= 2;
+    //save activation function for hidden layers
+    _activ=set_activation(activ);
     //by default do not normalize TODO change this
     _normalize=false;
     //register modules
@@ -108,7 +158,8 @@ struct Net : torch::nn::Module {
     }
     //now propagate
     for(unsigned i=0; i<_layers.size(); i++)
-        x = torch::elu(_layers[i]->forward(x));
+	x = activate(x,_layers[i],_activ);
+        //x = torch::elu(_layers[i]->forward(x));
     
     x = _out->forward(x);
     return x;
@@ -120,6 +171,7 @@ struct Net : torch::nn::Module {
   float _min, _max;
   vector<torch::nn::Linear> _layers;
   torch::nn::Linear _out = nullptr;
+  Activation _activ;
 };
 
 class NeuralNetworkVes : public Bias {
@@ -128,7 +180,7 @@ private:
   unsigned 		nn_input_dim;
   vector<int> 		nn_nodes;
   shared_ptr<Net>	nn_model;
-  shared_ptr<torch::optim::Adam> nn_opt; //TODO generalize optimizer
+  shared_ptr<torch::optim::Optimizer> nn_opt; //TODO generalize optimizer
 /*--parameters and options--*/
   float 		o_beta;
   int	 		o_stride;
@@ -177,6 +229,8 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
   keys.use("ARG");
   keys.add("compulsory","NODES","neural network architecture");
   keys.add("compulsory","RANGE","min and max of the range allowed");
+  keys.add("optional","OPTIM","choose the optimizer");
+  keys.add("optional","ACTIVATION","activation function for hidden layers");
   keys.add("optional","NBINS","bins for target distro");
   keys.add("optional","TEMP","temperature of the simulation");
   keys.add("optional","TAU","exponentially decaying average for KL");
@@ -185,7 +239,7 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
   keys.add("optional","AVE_STRIDE","the stride for the update of the bias");
   keys.add("optional","PRINT_STRIDE","the stride for printing the bias (iterations)");
   keys.add("optional","TARGET_STRIDE","the stride for updating the iterations (iterations)");
-   componentsAreNotOptional(keys);
+  componentsAreNotOptional(keys);
   useCustomisableComponents(keys); //needed to have an unknown number of components
   // Should be _bias below
   keys.addOutputComponent("_bias","default","one or multiple instances of this quantity can be referenced elsewhere in the input file. "
@@ -229,7 +283,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   t_min=range[0];
   t_max=range[1];
   // nbins
-  t_nbins=50;
+  t_nbins=100;
   parse("NBINS", t_nbins);
   // spacing and grid values
   t_grid.resize(t_nbins);
@@ -237,7 +291,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   unsigned k = 0;
   for (auto&& s2 : t_grid)
     s2 = t_min+(k++)*t_ds;
-  //define target distribution (UNIFORM): we call p(s)*ds=t_target_ds
+  //define target distribution (uniform): we call p(s)*ds=t_target_ds
   t_target_ds.resize(t_nbins);
   for (auto&& t : t_target_ds)
     t = 1./t_nbins;			//normalization
@@ -275,16 +329,36 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   // reset counters
   c_iter=0;
 
-  /*--PARSING DONE --*/
-  checkRead();
-
   /*--NEURAL NETWORK SETUP --*/
   log.printf("  Defining neural network with %d layers",nn_nodes.size() );
-  //nn_model = new Net (nn_nodes, o_periodic);
-  nn_model = make_shared<Net>(nn_nodes, o_periodic);
+  //set the activation function
+  std::string activation = "ELU";
+  parse("ACTIVATION",activation);
+  nn_model = make_shared<Net>(nn_nodes, o_periodic, activation);
+  //nn_model = make_shared<Net>(nn_nodes, o_periodic);
   //normalize setup TODO integrate this in a seamless way
   nn_model->setRange(t_min, t_max);
-  nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), /*lr=*/o_lrate);
+
+  //select the optimizer
+  std::string opt="ADAM";
+  parse("OPTIM",opt);
+  if (opt=="SGD")
+    nn_opt = make_shared<torch::optim::SGD>(nn_model->parameters(), o_lrate);
+  else if (opt=="RMSPROP")
+    nn_opt = make_shared<torch::optim::RMSprop>(nn_model->parameters(), o_lrate);
+  else if (opt=="ADAM")
+    nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), o_lrate);
+  else if (opt=="ADAGRAD")
+    nn_opt = make_shared<torch::optim::Adagrad>(nn_model->parameters(), o_lrate);
+  else if (opt=="AMSGRAD"){
+    torch::optim::AdamOptions opt(o_lrate);
+    opt.amsgrad(true);
+    nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), opt);
+  } else {
+    cerr<<"ERROR! Can't recognize the optimizer: "+opt<<endl;
+        exit(-1);
+  } 
+//  nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), /*lr=*/o_lrate);
   //torch::optim::AdamOptions opt(o_lrate);
   //opt.amsgrad(true);
   //opt.beta1(0.99);
@@ -315,6 +389,9 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   v_rct=getPntrToComponent("rct");
   addComponent("rbias"); componentIsNotPeriodic("rbias");
   v_rbias=getPntrToComponent("rbias");
+
+  /*--PARSING DONE --*/
+  checkRead();
 
   /*--LOG INFO--*/
   log.printf("  Inputs: %d\n",nn_input_dim);
