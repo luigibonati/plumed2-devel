@@ -38,6 +38,7 @@ Work in progress
 */
 //+ENDPLUMEDOC
 
+//aux function to sum two vectors element-wise
 template <typename T>
 std::vector<T> operator+(const std::vector<T>& a, const std::vector<T>& b){
     assert(a.size() == b.size());
@@ -47,6 +48,7 @@ std::vector<T> operator+(const std::vector<T>& a, const std::vector<T>& b){
                    std::back_inserter(result), std::plus<T>());
     return result;
 }
+//aux function to multiply all elements of a vector with a scalar
 template <class T, class Q>
 std::vector <T> operator* (const Q c, std::vector <T> A){
     std::transform (A.begin (), A.end (), A.begin (),
@@ -69,14 +71,9 @@ inline void exp_added(double& expsum,double expvalue)
 	expsum=expvalue+std::log(1.0+exp(expsum-expvalue));
 }
 
-enum Activation {
-  SIGMOID, /**< `SIGMOID` : Sigmoid function \f$x\longrightarrow \frac {1} {1+e^{-x}}\f$ */
-  TANH, /**< `TANH` : Tanh function \f$x\longrightarrow \frac {1-e^{-2x}} {1+e^{-2x}}\f$ */
-  RELU, /**< `RELU` : Rectified linear unit \f$x\longrightarrow \max(0,x)\f$ */
-  ELU, /**< `ELU` :  */
-  LINEAR, /**< `LINEAR` : Identity function \f$x\longrightarrow x\f$ */
-};
-
+//enumeration for activation functions
+enum Activation { SIGMOID, TANH, RELU,  ELU, LINEAR};
+ 
 Activation set_activation(const std::string& a)
 {
 	if(a=="SIGMOID"||a=="sigmoid"||a=="Sigmoid")
@@ -117,17 +114,19 @@ inline torch::Tensor activate(torch::Tensor x, torch::nn::Linear l, Activation f
     }
 }
 
+// NEURAL NETWORK MODULE
 struct Net : torch::nn::Module {
+  //constructor
   Net( vector<int> nodes, bool periodic, std::string activ ) : _layers() {
     //get number of hidden layers 
     _hidden=nodes.size() - 2;
     //check wheter to enforce periodicity
     _periodic=periodic;
-    if(_periodic)
+    if(_periodic)	//TODO generalize to array
         nodes[0] *= 2;
     //save activation function for hidden layers
     _activ=set_activation(activ);
-    //by default do not normalize TODO change this
+    //normalize later, using the method
     _normalize=false;
     //register modules
     for(int i=0; i<_hidden; i++)
@@ -138,18 +137,18 @@ struct Net : torch::nn::Module {
 
   ~Net() {}
 
+  //set range to normalize input
   void setRange(float m, float M){
     _normalize=true;
     _min=m;
     _max=M;
   }
 
+  //forward operation
   torch::Tensor forward(torch::Tensor x) {
     //enforce periodicity (encode every input x into {cos(x), sin(x)} )
     if(_periodic)
         x = at::stack({at::sin(x),at::cos(x)},1).view({x.size(0),2});
-    //normalize (this works only if you have a batch!)
-    //x = x.sub_(x.mean()).div_(x.std());
     //normalize (with range) 
     if(_normalize){
         float x_mean = (_max+_min)/2.;
@@ -166,21 +165,21 @@ struct Net : torch::nn::Module {
   }
 
   /*--class members--*/
-  int _hidden;
-  bool _periodic, _normalize;
-  float _min, _max;
+  int 			_hidden;
+  bool			_periodic, _normalize;
+  float			_min, _max;
   vector<torch::nn::Linear> _layers;
-  torch::nn::Linear _out = nullptr;
-  Activation _activ;
+  torch::nn::Linear 	_out = nullptr;
+  Activation 		_activ;
 };
 
 class NeuralNetworkVes : public Bias {
 private:
 /*--neural_network_setup--*/
-  unsigned 		nn_input_dim;
+  unsigned 		nn_dim;
   vector<int> 		nn_nodes;
   shared_ptr<Net>	nn_model;
-  shared_ptr<torch::optim::Optimizer> nn_opt; //TODO generalize optimizer
+  shared_ptr<torch::optim::Optimizer> nn_opt; 
 /*--parameters and options--*/
   float 		o_beta;
   int	 		o_stride;
@@ -189,7 +188,9 @@ private:
   int 			o_tau;
   float 		o_lrate;
   float			o_gamma;
-  bool			o_periodic; //TODO: PARSE PERIODIC CVs and pass it as an array of booleans 
+  bool			o_periodic;
+  float			o_decay;
+  float			o_adaptive_decay; 
 /*--counters--*/
   int			c_iter;
 /*--target distribution--*/
@@ -210,10 +211,9 @@ private:
   Value*		v_rct;
   Value*		v_rbias;
   Value*		v_ForceTot2;
+  Value*		v_lr;
 /*--methods-*/
   void 			update_coeffs();
-/*--extra--*/
-  float			bias_min;
 
 public:
   explicit NeuralNetworkVes(const ActionOptions&);
@@ -231,9 +231,13 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
   keys.add("compulsory","RANGE","min and max of the range allowed");
   keys.add("optional","OPTIM","choose the optimizer");
   keys.add("optional","ACTIVATION","activation function for hidden layers");
+  keys.add("optional","BETA1","b1 coeff of ADAM");
+  keys.add("optional","BETA2","b2 coeff of ADAM");
+  keys.add("optional","DECAY","decay constant for learning rate");
+  keys.add("optional","ADAPTIVE_DECAY","whether to adapt lr to KL under a threshold");
   keys.add("optional","NBINS","bins for target distro");
   keys.add("optional","TEMP","temperature of the simulation");
-  keys.add("optional","TAU","exponentially decaying average for KL");
+  keys.add("optional","TAU","exponentially decaying average for KL"); //change name of TAU
   keys.add("optional","LRATE","the step used for the minimization of the functional");
   keys.add("optional","GAMMA","gamma value for well-tempered distribution");
   keys.add("optional","AVE_STRIDE","the stride for the update of the bias");
@@ -241,7 +245,6 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
   keys.add("optional","TARGET_STRIDE","the stride for updating the iterations (iterations)");
   componentsAreNotOptional(keys);
   useCustomisableComponents(keys); //needed to have an unknown number of components
-  // Should be _bias below
   keys.addOutputComponent("_bias","default","one or multiple instances of this quantity can be referenced elsewhere in the input file. "
                           "these quantities will named with  the arguments of the bias followed by "
                           "the character string _bias. These quantities tell the user how much the bias is "
@@ -250,17 +253,18 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
   keys.addOutputComponent("rct","default","c(t) term");
   keys.addOutputComponent("rbias","default","bias-c(t)");
   keys.addOutputComponent("force2","default","total force");
+  keys.addOutputComponent("lr","default","learning rate");
 }
 
 NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   PLUMED_BIAS_INIT(ao)
 {
-  //for debugging TODO remove
+  //for debugging TODO remove?
   torch::manual_seed(0);
 
   /*--NN OPTIONS--*/
   //get # of inputs (CVs)
-  nn_input_dim=getNumberOfArguments();
+  nn_dim=getNumberOfArguments();
   //parse the NN architecture
   parseVector("NODES",nn_nodes);
   //todo: check dim_ and first dimension
@@ -295,13 +299,13 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   t_target_ds.resize(t_nbins);
   for (auto&& t : t_target_ds)
     t = 1./t_nbins;			//normalization
-    //t = 1/fabs(t_max-t_min); 
   //define histogram for computing biased distribution
   t_bias_hist.resize(t_nbins);
   std::fill(t_bias_hist.begin(), t_bias_hist.end(), 0.000001);
   //define grid for fes
   t_fes.resize(t_nbins);
   std::fill(t_fes.begin(), t_fes.end(), 0.);
+
   /*--PARAMETERS--*/
   // update stride
   o_stride=500;
@@ -335,7 +339,6 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   std::string activation = "ELU";
   parse("ACTIVATION",activation);
   nn_model = make_shared<Net>(nn_nodes, o_periodic, activation);
-  //nn_model = make_shared<Net>(nn_nodes, o_periodic);
   //normalize setup TODO integrate this in a seamless way
   nn_model->setRange(t_min, t_max);
 
@@ -344,11 +347,22 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   parse("OPTIM",opt);
   if (opt=="SGD")
     nn_opt = make_shared<torch::optim::SGD>(nn_model->parameters(), o_lrate);
-  else if (opt=="RMSPROP")
+  else if (opt=="NESTEROV"){
+    torch::optim::SGDOptions opt(o_lrate);
+    opt.nesterov(true);
+    nn_opt = make_shared<torch::optim::SGD>(nn_model->parameters(), opt);
+  }else if (opt=="RMSPROP")
     nn_opt = make_shared<torch::optim::RMSprop>(nn_model->parameters(), o_lrate);
-  else if (opt=="ADAM")
-    nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), o_lrate);
-  else if (opt=="ADAGRAD")
+  else if (opt=="ADAM"){
+    //nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), o_lrate);
+    torch::optim::AdamOptions opt(o_lrate);
+    float b1=0.9, b2=0.999;
+    parse("BETA1",b1);
+    parse("BETA2",b2);
+    opt.beta1(b1);
+    opt.beta2(b2);
+    nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), opt);
+  }else if (opt=="ADAGRAD")
     nn_opt = make_shared<torch::optim::Adagrad>(nn_model->parameters(), o_lrate);
   else if (opt=="AMSGRAD"){
     torch::optim::AdamOptions opt(o_lrate);
@@ -357,16 +371,21 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   } else {
     cerr<<"ERROR! Can't recognize the optimizer: "+opt<<endl;
         exit(-1);
-  } 
-//  nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), /*lr=*/o_lrate);
-  //torch::optim::AdamOptions opt(o_lrate);
-  //opt.amsgrad(true);
-  //opt.beta1(0.99);
-  //nn_opt = make_shared<torch::optim::Adam>(nn_model->parameters(), opt);
+  }
+  //parse the decay time
+  o_decay=0;
+  parse("DECAY",o_decay);
+  if(o_decay>0.) 		//convert from decay time to multiplicative factor: lr = lr * o_decay
+    o_decay=1-1/o_decay;
+
+  //whether to adapt learning rate to kl divergence
+  o_adaptive_decay=0;
+  parse("ADAPTIVE_DECAY",o_adaptive_decay);
+   
   /*--CREATE AUXILIARY VECTORS--*/
   //dummy backward pass in order to have the grads defined
   vector<torch::Tensor> params = nn_model->parameters();
-  torch::Tensor y = nn_model->forward( torch::rand({1}).view({1,nn_input_dim}) );
+  torch::Tensor y = nn_model->forward( torch::rand({1}).view({1,nn_dim}) );
   y.backward();
   //Define auxiliary vectors to store gradients
   nn_opt->zero_grad();
@@ -378,8 +397,6 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
     g_target.push_back(gg);
     g_tensor.push_back(p);
   }
-  //bias_min initialize
-  bias_min=0;
   /*--SET OUTPUT COMPONENTS--*/
   addComponent("force2"); componentIsNotPeriodic("force2");
   v_ForceTot2=getPntrToComponent("force2");
@@ -389,12 +406,14 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   v_rct=getPntrToComponent("rct");
   addComponent("rbias"); componentIsNotPeriodic("rbias");
   v_rbias=getPntrToComponent("rbias");
+  addComponent("lr"); componentIsNotPeriodic("lr");
+  v_rbias=getPntrToComponent("lr");
 
   /*--PARSING DONE --*/
   checkRead();
 
   /*--LOG INFO--*/
-  log.printf("  Inputs: %d\n",nn_input_dim);
+  log.printf("  Inputs: %d\n",nn_dim);
   log.printf("  Temperature T: %g\n",1./(Kb*o_beta));
   log.printf("  Beta (1/Kb*T): %g\n",o_beta);
   log.printf("  Stride for the ensemble average: %d\n",o_stride);
@@ -408,11 +427,11 @@ void NeuralNetworkVes::calculate() {
   double bias_pot=0;
   double tot_force2=0;
   //get current CVs
-  vector<float> current_S(nn_input_dim);
-  for(unsigned i=0; i<nn_input_dim; i++)
+  vector<float> current_S(nn_dim);
+  for(unsigned i=0; i<nn_dim; i++)
     current_S[i]=getArgument(i);
   //convert current CVs into torch::Tensor
-  torch::Tensor input_S = torch::tensor(current_S).view({1,nn_input_dim});
+  torch::Tensor input_S = torch::tensor(current_S).view({1,nn_dim});
   input_S.set_requires_grad(true);
   //propagate to get the bias
   nn_opt->zero_grad();
@@ -422,10 +441,9 @@ void NeuralNetworkVes::calculate() {
   output.backward();
   vector<float> force=tensor_to_vector( input_S.grad() );
   //set bias
-//  setBias(bias_pot);
-  setBias(bias_pot-bias_min);
+  setBias(bias_pot);
   //set forces
-  for (unsigned i=0; i<nn_input_dim; i++){
+  for (unsigned i=0; i<nn_dim; i++){
     tot_force2+=pow(force[i],2);
     setOutputForce(i,-force[i]); //be careful of minus sign
   }
@@ -438,11 +456,11 @@ void NeuralNetworkVes::calculate() {
   }
   //accumulate histogram for biased distribution TODO grid more than 1cv
   int idx=(current_S[0]-t_min)/t_ds;
-    //check if outside the grid TODO crash?
+  //check if outside the grid TODO crash?
   if(idx>=t_nbins) idx=t_nbins-1;
   if(idx<0) idx=0;
   //t_bias_hist[idx]++;
-    //get current weight
+  //get current weight
   float weight=getStep()+1;
   if (o_tau>0 && weight>o_tau)
     weight=o_tau;
@@ -450,12 +468,6 @@ void NeuralNetworkVes::calculate() {
   /*--UPDATE PARAMETERS--*/
   if(getStep()%o_stride==0){
     c_iter++; 
-    //TODO use internal routines
-//    ofstream biasfile;
-//    if( c_iter % o_print == 0){
-//        biasfile.open(("bias.iter-"+to_string(c_iter)).c_str());
-//        biasfile << "#\tV(s)" << endl;
-//    }
     /**Biased ensemble contribution**/
     //normalize average gradient
     for (unsigned i=0; i<g_mean.size(); i++)
@@ -466,7 +478,7 @@ void NeuralNetworkVes::calculate() {
     for (unsigned i=0; i<t_grid.size(); i++){
       //scan over grid
       current_S[0] = t_grid[i];
-      torch::Tensor input_S_target = torch::tensor(current_S).view({1,nn_input_dim});
+      torch::Tensor input_S_target = torch::tensor(current_S).view({1,nn_dim});
       nn_opt->zero_grad();
       output = nn_model->forward( input_S_target );
       bias_grid[i] = output.item<float>();
@@ -477,8 +489,6 @@ void NeuralNetworkVes::calculate() {
         gg = t_target_ds[i] * gg;
         g_target[j] = g_target[j] + gg;
       }
-      //print bias on file
-      //if( c_iter % o_print == 0) biasfile << current_S[0] << "\t" << bias_grid[i] << endl;
     }
 
     //shift bias to zero
@@ -488,6 +498,7 @@ void NeuralNetworkVes::calculate() {
       bias_grid[i]-=bias_min;
 */ 
     //print bias to file
+/*
     if( c_iter % o_print == 0){
       ofstream biasfile;
       biasfile.open(("bias.iter-"+to_string(c_iter)).c_str());
@@ -495,32 +506,9 @@ void NeuralNetworkVes::calculate() {
         biasfile << t_grid[i] << "\t" << bias_grid[i] << endl;
       biasfile.close();
     }
-    /**alternative with minibatch**/ //be careful about target distribution normalization
-/*
-    torch::Tensor batch_S = torch::tensor(t_grid).view({t_nbins,nn_input_dim});    
-    nn_opt->zero_grad();
-    output = nn_model->forward( batch_S );
-    output.backward();
-    p = nn_model->parameters();
-    for (unsigned i=0; i<p.size(); i++){
-        vector<float> gg = tensor_to_vector( p[i].grad() );
-        gg = t_target[i] * gg;
-        g_target[i] = g_target[i] + gg;
-    } 
-    vector<float> bias_grid = tensor_to_vector(output);
-    if( c_iter % o_print == 0)
-      for(int i=0; i<t_grid.size(); i++)
-	biasfile << t_grid[i] << "\t" << bias_grid[i] << endl;
 */
     //reset gradients
     nn_opt->zero_grad();
-    //normalize target gradient (if different from uniform) TODO or maybe not normalize at all?
-    //for (unsigned i=0; i<g_target.size(); i++)
-    // g_target[i] = ( (t_max-t_min)/t_nbins ) * g_target[i]; // if not using minibatch
-      //g_target[i] = (t_max-t_min) * g_target[i];
-
-    //close the ostream
-    //if( c_iter % o_print == 0) biasfile.close(); 
 
     /**Assign new gradient and update coefficients**/
     for (unsigned i=0; i<g_.size()-1; i++){  //until size-1 since we do not want to update the bias of the output layer
@@ -561,9 +549,6 @@ void NeuralNetworkVes::calculate() {
     double bias_norm=0;
     for (auto& n : t_bias_hist)
       bias_norm += n;
-    //t_bias_hist = (t_nbins/(t_max-t_min)) * t_bias_hist;
-    //t_bias_hist = (1./sum * t_nbins/(t_max-t_min)) * t_bias_hist;
-    //t_bias_hist = (1./o_stride * t_nbins/(t_max-t_min)) * t_bias_hist;
     //normalize distributions
     auto biased_dist = (1./bias_norm) * t_bias_hist;
     auto target_dist = (1./target_norm) * t_target_ds;
@@ -572,7 +557,19 @@ void NeuralNetworkVes::calculate() {
     for (unsigned i=0; i<target_dist.size(); i++)
       kl+=biased_dist[i]*std::log(biased_dist[i]/target_dist[i]);
     getPntrToComponent("kl")->set(kl);
-    //std::fill(t_bias_hist.begin(), t_bias_hist.end(), 0.000001);
+
+    //learning rate decay
+    if(o_decay>0){
+      float new_lr;
+      //if adaptive: rescale it only when the KL is below a threshold
+      if(o_adaptive_decay==0 || kl<o_adaptive_decay) 
+        new_lr=dynamic_pointer_cast<torch::optim::Adam, torch::optim::Optimizer>(nn_opt)->options.learning_rate() ;
+      else
+        new_lr=o_lrate;
+      
+      dynamic_pointer_cast<torch::optim::Adam, torch::optim::Optimizer>(nn_opt)->options.learning_rate( new_lr);
+      getPntrToComponent("lr")->set(new_lr);
+    }
 
     /*--UPDATE TARGET DISTRIBUTION--*/ 
     float sum_exp_beta_F = 0;
@@ -594,8 +591,6 @@ void NeuralNetworkVes::calculate() {
 	file.close();
       }
     }  
-    //update parameters
-    //nn_opt->step();
  }
 }
 
