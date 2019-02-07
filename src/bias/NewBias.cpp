@@ -24,6 +24,7 @@
 #include "core/ActionRegister.h"
 #include "core/ActionSet.h"
 #include "core/Atoms.h"
+#include "tools/Grid.h"
 #include <torch/torch.h>
 
 using namespace std;
@@ -117,13 +118,14 @@ inline torch::Tensor activate(torch::Tensor x, torch::nn::Linear l, Activation f
 // NEURAL NETWORK MODULE
 struct Net : torch::nn::Module {
   //constructor
-  Net( vector<int> nodes, bool periodic, std::string activ ) : _layers() {
+  Net( vector<int> nodes, vector<bool> periodic, std::string activ ) : _layers() {
     //get number of hidden layers 
     _hidden=nodes.size() - 2;
     //check wheter to enforce periodicity
     _periodic=periodic;
-    if(_periodic)	//TODO generalize to array
-        nodes[0] *= 2;
+    for(int i=0;i<nodes[0];i++)
+      if(_periodic[i])	
+        nodes[0]++;
     //save activation function for hidden layers
     _activ=set_activation(activ);
     //normalize later, using the method
@@ -137,8 +139,8 @@ struct Net : torch::nn::Module {
 
   ~Net() {}
 
-  //set range to normalize input
-  void setRange(float m, float M){
+  //set range to normalize input //TODO IN MORE DIMENSIONS
+  void setRange(vector<float> m, vector<float> M){
     _normalize=true;
     _min=m;
     _max=M;
@@ -146,14 +148,20 @@ struct Net : torch::nn::Module {
 
   //forward operation
   torch::Tensor forward(torch::Tensor x) {
-    //enforce periodicity (encode every input x into {cos(x), sin(x)} )
-    if(_periodic)
-        x = at::stack({at::sin(x),at::cos(x)},1).view({x.size(0),2});
-    //normalize (with range) 
+    //enforce periodicity (encode every input x into {cos(x), sin(x)} ): works only if all of them are periodic TODO
+    if(_periodic[0]) //size(0): number of elements in batch - size(1): size of the input 
+        x = at::stack({at::sin(x),at::cos(x)},1).view({x.size(0),2*x.size(1)});
+    //normalize input (given range) 
     if(_normalize){
-        float x_mean = (_max+_min)/2.;
-	float x_range = (_max-_min)/2.;
-    	x = (x-x_mean)/x_range; 
+      for(int batch=0;batch<x.size(0);batch++){
+	for(unsigned i=0;i<_max.size();i++){
+          float x_mean = (_max[i]+_min[i])/2.;
+	  float x_range = (_max[i]-_min[i])/2.;
+    	  x[batch][i] = (x[batch][i]-x_mean)/x_range;
+	  if(_periodic[i]) // periodic stack above convert x,y,... into sin(x),sin(y),...,cos(x),cos(y),...
+	    x[batch][i+_max.size()] = (x[batch][i+_max.size()]-x_mean)/x_range;
+	}
+      }
     }
     //now propagate
     for(unsigned i=0; i<_layers.size(); i++)
@@ -166,8 +174,9 @@ struct Net : torch::nn::Module {
 
   /*--class members--*/
   int 			_hidden;
-  bool			_periodic, _normalize;
-  float			_min, _max;
+  bool			_normalize;
+  vector<bool>		_periodic;
+  vector<float>		_min, _max;
   vector<torch::nn::Linear> _layers;
   torch::nn::Linear 	_out = nullptr;
   Activation 		_activ;
@@ -188,16 +197,18 @@ private:
   int 			o_tau;
   float 		o_lrate;
   float			o_gamma;
-  bool			o_periodic;
+  vector<bool>		o_periodic;
   float			o_decay;
   float			o_adaptive_decay; 
 /*--counters--*/
   int			c_iter;
 /*--target distribution--*/
-  float 		t_min, t_max; 
+  vector<float>		t_min, t_max; 
   float 		t_ds;
   int 			t_nbins;
   vector<float> 	t_grid,t_target_ds,t_bias_hist,t_fes;
+/*--grids--*/
+  std::unique_ptr<Grid> g_target_ds,g_bias_hist,g_fes;
 /*--reweight--*/
   float 		r_ct; 
   float 		r_bias;
@@ -228,7 +239,8 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
   Bias::registerKeywords(keys);
   keys.use("ARG");
   keys.add("compulsory","NODES","neural network architecture");
-  keys.add("compulsory","RANGE","min and max of the range allowed");
+  keys.add("compulsory","MIN","min of the target distribution range");
+  keys.add("compulsory","MAX","max of the target distribution range");
   keys.add("optional","OPTIM","choose the optimizer");
   keys.add("optional","ACTIVATION","activation function for hidden layers");
   keys.add("optional","BETA1","b1 coeff of ADAM");
@@ -282,19 +294,20 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
 
   /*--TARGET DISTRIBUTION--*/
   // range 
-  vector<float> range;
-  parseVector("RANGE",range);
-  t_min=range[0];
-  t_max=range[1];
+  vector<float> min,max;
+  parseVector("MIN",min);
+  t_min=min;
+  parseVector("MAX",max);
+  t_max=max;
   // nbins
   t_nbins=100;
   parse("NBINS", t_nbins);
   // spacing and grid values
   t_grid.resize(t_nbins);
-  t_ds = fabs(t_max-t_min)/t_nbins;
+  t_ds = fabs(t_max[0]-t_min[0])/t_nbins;
   unsigned k = 0;
   for (auto&& s2 : t_grid)
-    s2 = t_min+(k++)*t_ds;
+    s2 = t_min[0]+(k++)*t_ds;
   //define target distribution (uniform): we call p(s)*ds=t_target_ds
   t_target_ds.resize(t_nbins);
   for (auto&& t : t_target_ds)
@@ -328,8 +341,10 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   // parse gamma
   o_gamma=0;
   parse("GAMMA",o_gamma);
-  // check if args are periodic TODO IMPROVE TO DEAL WITH MORE CVs
-  o_periodic=getPntrToArgument(0)->isPeriodic();
+  // check if args are periodic 
+  o_periodic.resize(nn_dim);
+  for (unsigned i=0; i<nn_dim; i++)
+    o_periodic[i]=getPntrToArgument(i)->isPeriodic();
   // reset counters
   c_iter=0;
 
@@ -379,13 +394,13 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
     o_decay=1-1/o_decay;
 
   //whether to adapt learning rate to kl divergence
-  o_adaptive_decay=0;
+  o_adaptive_decay=0.;
   parse("ADAPTIVE_DECAY",o_adaptive_decay);
    
   /*--CREATE AUXILIARY VECTORS--*/
   //dummy backward pass in order to have the grads defined
   vector<torch::Tensor> params = nn_model->parameters();
-  torch::Tensor y = nn_model->forward( torch::rand({1}).view({1,nn_dim}) );
+  torch::Tensor y = nn_model->forward( torch::rand({nn_dim}).view({1,nn_dim}) );
   y.backward();
   //Define auxiliary vectors to store gradients
   nn_opt->zero_grad();
@@ -455,7 +470,7 @@ void NeuralNetworkVes::calculate() {
     g_mean[i] = g_mean[i] + gg;
   }
   //accumulate histogram for biased distribution TODO grid more than 1cv
-  int idx=(current_S[0]-t_min)/t_ds;
+  int idx=(current_S[0]-t_min[0])/t_ds;
   //check if outside the grid TODO crash?
   if(idx>=t_nbins) idx=t_nbins-1;
   if(idx<0) idx=0;
@@ -558,12 +573,12 @@ void NeuralNetworkVes::calculate() {
       kl+=biased_dist[i]*std::log(biased_dist[i]/target_dist[i]);
     getPntrToComponent("kl")->set(kl);
 
-    //learning rate decay
+    //--LEARNING RATE DECAY--
     if(o_decay>0){
       float new_lr;
       //if adaptive: rescale it only when the KL is below a threshold
       if(o_adaptive_decay==0 || kl<o_adaptive_decay) 
-        new_lr=dynamic_pointer_cast<torch::optim::Adam, torch::optim::Optimizer>(nn_opt)->options.learning_rate() ;
+		new_lr=dynamic_pointer_cast<torch::optim::Adam, torch::optim::Optimizer>(nn_opt)->options.learning_rate() * o_decay;
       else
         new_lr=o_lrate;
       
