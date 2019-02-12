@@ -147,15 +147,13 @@ struct Net : torch::nn::Module {
   //set range to normalize input 
   void setRange(vector<string> m, vector<string> M){
     _normalize=true;
-    //convert strings to float
-    _min.reserve(m.size());
-    std::transform(m.begin(), m.end(), back_inserter(_min), [](string const& val) {return stod(val);});
-    _max.reserve(M.size());
-    std::transform(M.begin(), M.end(), back_inserter(_max), [](string const& val) {return stod(val);});
     vector<float> mean, inv_range;
-    for(unsigned i=0;i<_min.size();i++){
-      mean.push_back( (_max[i]+_min[i])/2. );
-      inv_range.push_back( 1./( (_max[i]-_min[i])/2.) ) ;
+    for(unsigned i=0;i<m.size();i++){
+      double max,min;
+      Tools::convert(m[i],min);
+      Tools::convert(M[i],max);
+      mean.push_back( (max+min)/2. );
+      inv_range.push_back( 1./( (max-min)/2.) ) ;
     } 
     _mean = torch::tensor(mean).view({1,m.size()});
     _inv_range = torch::tensor(inv_range).view({1,m.size()});
@@ -254,7 +252,7 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
 
   keys.add("compulsory","GRID_MIN","min of the target distribution range");
   keys.add("compulsory","GRID_MAX","max of the target distribution range");
-  keys.add("optional","GRID_BINS","number of bins");
+  keys.add("optional","GRID_BIN","number of bins");
 
   keys.add("optional","TAU_KL","exponentially decaying average for KL");
   keys.add("optional","DECAY","decay constant for learning rate");
@@ -341,7 +339,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   parseVector("GRID_MAX",g_max);
   // nbins
   g_nbins.resize(nn_dim);
-  parseVector("GRID_BINS", g_nbins); 
+  parseVector("GRID_BIN", g_nbins); 
   // gridoptions
   bool spline=true;
   bool sparsegrid=false;
@@ -351,7 +349,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
     // reset counters
     c_iter=0;
     c_start_from=0;
-    //init grids
+    //init grids 
     grid_bias.reset(new Grid(getLabel()+".bias",getArguments(),g_min,g_max,g_nbins,/*spline*/spline,true));
     grid_bias_hist.reset(new Grid(getLabel()+".hist",getArguments(),g_min,g_max,g_nbins,/*spline*/false,true));
     grid_fes.reset(new Grid(getLabel()+".fes",getArguments(),g_min,g_max,g_nbins,/*spline*/false,true));
