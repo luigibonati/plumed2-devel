@@ -252,7 +252,7 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
 
   keys.add("compulsory","GRID_MIN","min of the target distribution range");
   keys.add("compulsory","GRID_MAX","max of the target distribution range");
-  keys.add("optional","GRID_BIN","number of bins");
+  keys.add("compulsory","GRID_BIN","number of bins");
 
   keys.add("optional","TAU_KL","exponentially decaying average for KL");
   keys.add("optional","DECAY","decay constant for learning rate");
