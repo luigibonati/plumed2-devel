@@ -623,7 +623,7 @@ void NeuralNetworkVes::calculate() {
       nn_opt->zero_grad();
       output = nn_model->forward( input_S_target );
       output.backward();
-      vector<double> force=tensor_to_vector_d( input_S.grad() );
+      vector<double> force=tensor_to_vector_d( input_S_target.grad() );
       grid_bias->setValueAndDerivatives(i,output.item<double>(),force);
     }
    
