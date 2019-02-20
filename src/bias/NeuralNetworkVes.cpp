@@ -219,6 +219,7 @@ private:
   vector<string>	g_min, g_max; 
   vector<float>		g_ds;
   vector<unsigned>	g_nbins;
+  vector<unsigned>	g_counter;
 /*--reweight--*/
   float 		r_ct; 
   float 		r_bias;
@@ -410,16 +411,20 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   
   }
 
+  unsigned nbins=1;
   //normalize target distribution (if not restarted or if uniform td)
   if(!getRestart() || o_target==0){
     vector<unsigned> bins=grid_target_ds->getNbin();
-    unsigned nbins=1;
     for(auto&& b : bins)
       nbins *= b;
     for (Grid::index_t t=mpi_rank; t<grid_fes->getSize(); t+=mpi_num)
       grid_target_ds->setValue(t,1./nbins);
   } 
 
+  //define counter for kl historam
+  g_counter.resize( nbins );
+  std::fill(g_counter.begin(), g_counter.end(), 0);
+ 
   /*--NEURAL NETWORK SETUP --*/
   //set the activation function
   std::string activation = "ELU";
@@ -595,12 +600,21 @@ if(!static_bias){
   //accumulate histogram for biased distribution
   vector<double> s_double(current_S.begin(), current_S.end());
   Grid::index_t current_index = grid_bias_hist->getIndex(s_double);
+  g_counter[current_index] ++; 
+/*
   //get current weight
   float weight=getStep()+1;
-  if (o_tau>0 && weight>o_tau)
+  if (o_tau>0 ) //&& weight>o_tau)
     weight=o_tau;
-  grid_bias_hist->addValue(current_index,1./weight);
 
+  for (Grid::index_t i=0; i<grid_bias_hist->getSize(); i+=1){
+    double h = grid_bias_hist->getValue(i);
+    if(i==current_index)
+      grid_bias_hist->addValue(i,(1.-h)/weight);
+    else
+      grid_bias_hist->addValue(i,(-h)/weight);
+  }
+*/
   /*--UPDATE PARAMETERS--*/
   if(getStep()%o_stride==0){
     /**Biased ensemble contribution**/
@@ -696,6 +710,21 @@ if(!static_bias){
     getPntrToComponent("rbias")->set(r_bias);
   }
     //--COMPUTE KL--
+    //get current weight
+    float weight=getStep()+1;
+    if (o_tau>0 ) //&& weight>o_tau)
+      weight=o_tau;
+
+    double bias_norm=0;
+    for (Grid::index_t i=0; i<grid_bias_hist->getSize(); i+=1){
+      double h = grid_bias_hist->getValue(i);
+      double new_value = h+(g_counter[i]-o_stride*h)/weight;
+      bias_norm+=new_value;
+      grid_bias_hist->setValue(i,new_value);
+      if(!o_coft) target_norm += grid_target_ds->getValue(i);
+    }
+    std::fill(g_counter.begin(), g_counter.end(), 0); 
+/*
     //normalize bias histogram
     double bias_norm=0;
     for (Grid::index_t i=mpi_rank; i<grid_fes->getSize(); i+=mpi_num){
@@ -706,6 +735,7 @@ if(!static_bias){
       comm.Sum(bias_norm);
       if(!o_coft) comm.Sum(target_norm);
     }
+*/
     //compute kl
     double kl=0;
     for (Grid::index_t i=mpi_rank; i<grid_bias_hist->getSize(); i+=mpi_num)
