@@ -29,6 +29,7 @@
 
 #include <torch/torch.h>
 
+#include "tools/Communicator.h"
 using namespace std;
 
 
@@ -122,7 +123,7 @@ inline torch::Tensor activate(torch::Tensor x, torch::nn::Linear l, Activation f
 
 // NEURAL NETWORK MODULE
 struct Net : torch::nn::Module {
-  //constructor //TODO : avoid input and output nodes
+  //constructor //
   Net( vector<int> nodes, vector<bool> periodic, std::string activ ) : _layers() {
     //get number of hidden layers 
     _hidden=nodes.size() - 2;
@@ -188,6 +189,10 @@ struct Net : torch::nn::Module {
 
 class NeuralNetworkVes : public Bias {
 private:
+
+/*--MPI Setup--*/
+  unsigned 		mpi_num;
+  unsigned 		mpi_rank;
 /*--neural_network_setup--*/
   unsigned 		nn_dim;
   vector<int> 		nn_nodes;
@@ -204,9 +209,11 @@ private:
   vector<bool>		o_periodic;
   float			o_decay;
   float			o_adaptive_decay; 
+  bool			o_coft;
 /*--counters--*/
   int			c_iter;
   int			c_start_from;
+  double		c_lr_scaling;
 /*--grids--*/
   std::unique_ptr<Grid> grid_bias,grid_target_ds,grid_bias_hist,grid_fes;
   vector<string>	g_min, g_max; 
@@ -268,6 +275,9 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
   keys.add("optional","RESTART_FROM","iteration to restart from");
   keys.add("optional","COLVAR_FILE","colvar filename for restart");
 
+  keys.addFlag("SERIAL",false,"run without grid parallelization");
+  keys.addFlag("CALC_RCT",false,"compute c(t)");
+
   componentsAreNotOptional(keys);
   useCustomisableComponents(keys); //needed to have an unknown number of components
   keys.addOutputComponent("_bias","default","one or multiple instances of this quantity can be referenced elsewhere in the input file.");
@@ -275,7 +285,7 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
   keys.addOutputComponent("rct","default","c(t) term");
   keys.addOutputComponent("rbias","default","bias-c(t)");
   keys.addOutputComponent("force2","default","total force");
-  keys.addOutputComponent("lr","default","learning rate");
+  keys.addOutputComponent("lrscale","default","scaling factor for learning rate");
 }
 
 NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
@@ -323,6 +333,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   // parse learning rate
   o_lrate=0.001;
   parse("LRATE",o_lrate); 
+  c_lr_scaling=1.;
   // parse gamma
   o_gamma=0;
   parse("GAMMA",o_gamma);
@@ -344,6 +355,21 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   bool spline=true;
   bool sparsegrid=false;
 
+  //MPI OPTIONS
+  mpi_num=comm.Get_size();
+  mpi_rank=comm.Get_rank();
+  bool serial=false;
+  parseFlag("SERIAL",serial);
+  if (serial)
+  {
+    mpi_num=1;
+    mpi_rank=0;
+  }
+
+  //coft
+  o_coft=false;
+  parseFlag("CALC_RCT",o_coft);
+
   /*--GRID SETUP--*/
   if(!getRestart()){
     // reset counters
@@ -355,7 +381,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
     grid_fes.reset(new Grid(getLabel()+".fes",getArguments(),g_min,g_max,g_nbins,/*spline*/false,true));
     grid_target_ds.reset(new Grid(getLabel()+".target",getArguments(),g_min,g_max,g_nbins,/*spline*/false,true));
     //fill grids with initial values 
-    for (Grid::index_t t=0; t<grid_fes->getSize(); t++){
+    for (Grid::index_t t=mpi_rank; t<grid_fes->getSize(); t+=mpi_num){
       grid_bias_hist->setValue(t,1e-6);
       grid_fes->setValue(t,0.);
     } 
@@ -369,7 +395,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
       //retrieve latest grid printed
       c_start_from=(c_iter/o_print)*o_print;
     }
-    //create grids from files
+    //create grids from files //
     grid_bias=createGridFromFile(getLabel()+".bias",getArguments(),"bias.iter-"+to_string(c_start_from),g_min,g_max,g_nbins,sparsegrid,spline);
     grid_bias_hist=createGridFromFile(getLabel()+".hist",getArguments(),"hist.iter-"+to_string(c_start_from),g_min,g_max,g_nbins,sparsegrid,false);
     grid_fes=createGridFromFile(getLabel()+".fes",getArguments(),"fes.iter-"+to_string(c_start_from),g_min,g_max,g_nbins,sparsegrid,false);
@@ -377,6 +403,11 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
       grid_target_ds=createGridFromFile(getLabel()+".target",getArguments(),"target.iter-"+to_string(c_start_from),g_min,g_max,g_nbins,sparsegrid,false);
     else
       grid_target_ds.reset(new Grid(getLabel()+".target",getArguments(),g_min,g_max,g_nbins,/*spline*/false,true));
+
+    //sync all . Not sure is mandatory but is no harm
+     if(mpi_num>1)
+       comm.Barrier();
+  
   }
 
   //normalize target distribution (if not restarted or if uniform td)
@@ -385,7 +416,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
     unsigned nbins=1;
     for(auto&& b : bins)
       nbins *= b;
-    for (Grid::index_t t=0; t<grid_fes->getSize(); t++)
+    for (Grid::index_t t=mpi_rank; t<grid_fes->getSize(); t+=mpi_num)
       grid_target_ds->setValue(t,1./nbins);
   } 
 
@@ -450,18 +481,25 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
     g_target.push_back(gg);
     g_tensor.push_back(p);
   }
+  //reset mean grads
+  for (unsigned i=0; i<g_.size()-1; i++){ 
+    std::fill(g_[i].begin(), g_[i].end(), 0.);
+    std::fill(g_mean[i].begin(), g_mean[i].end(), 0.);
+    std::fill(g_target[i].begin(), g_target[i].end(), 0.);
+  }
   /*--SET OUTPUT COMPONENTS--*/
   addComponent("force2"); componentIsNotPeriodic("force2");
   v_ForceTot2=getPntrToComponent("force2");
   addComponent("kl"); componentIsNotPeriodic("kl");
   v_kl=getPntrToComponent("kl");
-  addComponent("rct"); componentIsNotPeriodic("rct");
-  v_rct=getPntrToComponent("rct");
-  addComponent("rbias"); componentIsNotPeriodic("rbias");
-  v_rbias=getPntrToComponent("rbias");
-  addComponent("lr"); componentIsNotPeriodic("lr");
-  v_rbias=getPntrToComponent("lr");
-
+   addComponent("lrscale"); componentIsNotPeriodic("lrscale");
+  v_lr=getPntrToComponent("lrscale");
+  if(o_coft){
+    addComponent("rct"); componentIsNotPeriodic("rct");
+    v_rct=getPntrToComponent("rct");
+    addComponent("rbias"); componentIsNotPeriodic("rbias");
+    v_rbias=getPntrToComponent("rbias");
+  }
 
   /*--LOAD MODEL AND OPT PARAMETERS FROM RESTART*/
   if (getRestart()){
@@ -481,20 +519,20 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
 
     if (ifile.FileExist(colvar_file)){
       ifile.open(colvar_file);
-      double time,new_lr;
+      double time;
       while(ifile.scanField("time",time)){
-        ifile.scanField(getLabel()+".lr",new_lr);
+        ifile.scanField(getLabel()+".lrscale",c_lr_scaling);
         ifile.scanField();
       }
       ifile.close();
       //set lr to model
-      dynamic_pointer_cast<torch::optim::Adam, torch::optim::Optimizer>(nn_opt)->options.learning_rate( new_lr ); 
-      getPntrToComponent("lr")->set( new_lr );
+      dynamic_pointer_cast<torch::optim::Adam, torch::optim::Optimizer>(nn_opt)->options.learning_rate( o_lrate * c_lr_scaling ); 
     } else
       error("The COLVAR file you want to read: " + colvar_file + ", cannot be found!"); 
     
-  }else
-    getPntrToComponent("lr")->set( o_lrate );
+  }
+
+    getPntrToComponent("lrscale")->set( c_lr_scaling );
 
   /*--PARSING DONE --*/
   checkRead();
@@ -518,11 +556,21 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   if(o_target==0) log.printf("UNIFORM");
   else log.printf("WELL-TEMPERED, with a recursive update every %d iterations\n",o_target);
   if (getRestart()) log.printf("  RESTART from iteration: %d\n",c_start_from);
+  log.printf("  -- GRID SETTINGS --\n");
+  log.printf("  TODO \n");
+  log.printf("  -- MPI SETTINGS --\n");
+  log.printf("  Num processes: %d\n",mpi_num);
+  
 }
 
 void NeuralNetworkVes::calculate() {
   double bias_pot=0;
   double tot_force2=0;
+  vector<double> der(nn_dim);
+  //check whether to update the bias or use the one stored in the grid 
+  bool static_bias = false; 
+  if(c_lr_scaling < 5.e-5) static_bias=true;
+if(!static_bias){
   //get current CVs
   vector<float> current_S(nn_dim);
   for(unsigned i=0; i<nn_dim; i++)
@@ -536,15 +584,7 @@ void NeuralNetworkVes::calculate() {
   bias_pot = output.item<float>();
   //backprop to get forces
   output.backward();
-  vector<float> force=tensor_to_vector( input_S.grad() );
-  //set bias
-  setBias(bias_pot);
-  //set forces
-  for (unsigned i=0; i<nn_dim; i++){
-    tot_force2+=pow(force[i],2);
-    setOutputForce(i,-force[i]); //be careful of minus sign
-  }
-  v_ForceTot2->set(tot_force2);
+  der = tensor_to_vector_d( input_S.grad() );
   //accumulate gradients
   vector<torch::Tensor> p = nn_model->parameters();
   for (unsigned i=0; i<p.size(); i++){
@@ -569,7 +609,7 @@ void NeuralNetworkVes::calculate() {
       g_mean[i] = -(1./o_stride) * g_mean[i];
 
     /**Target distribution contribution**/
-    for (Grid::index_t i=0; i<grid_target_ds->getSize(); i++){
+    for (Grid::index_t i=mpi_rank; i<grid_fes->getSize(); i+=mpi_num){
       //scan over grid //TODO check conversion from double to float
       vector<double> point_S=grid_target_ds->getPoint(i);
       vector<float> target_S(point_S.begin(),point_S.end());
@@ -581,19 +621,17 @@ void NeuralNetworkVes::calculate() {
 //      vector<double> force=tensor_to_vector_d( input_S.grad() );
 //      grid_bias->setValueAndDerivatives(i,output.item<double>(),force);
       p = nn_model->parameters();
-      for (unsigned j=0; j<p.size()-1; j++){
+      for(unsigned j=0; j<p.size()-1; j++){
         vector<float> gg = tensor_to_vector( p[j].grad() );
         gg = grid_target_ds->getValue(i) * gg;
         g_target[j] = g_target[j] + gg;
       }
     }
+    if(mpi_num>1){
+      for(unsigned j=0; j<p.size()-1; j++)
+        comm.Sum(g_target[j]);
+    }
 
-    //shift bias to zero
-/*
-    bias_min = *std::min_element(bias_grid.begin(), bias_grid.end());
-    for (unsigned i=0; i<bias_grid.size(); i++)
-      bias_grid[i]-=bias_min;
-*/ 
     //reset gradients
     nn_opt->zero_grad();
 
@@ -609,13 +647,13 @@ void NeuralNetworkVes::calculate() {
         std::fill(g_[i].begin(), g_[i].end(), 0.);
         std::fill(g_mean[i].begin(), g_mean[i].end(), 0.);
         std::fill(g_target[i].begin(), g_target[i].end(), 0.);
-      }
+    }
     //update the parameters
     if(c_iter>c_start_from)
       nn_opt->step();
 
     /*--SAVE BIAS INTO THE GRID--*/
-    for (Grid::index_t i=0; i<grid_target_ds->getSize(); i++){
+    for (Grid::index_t i=0; i<grid_fes->getSize(); i+=1){
       vector<double> point_S=grid_target_ds->getPoint(i);
       vector<float> target_S(point_S.begin(),point_S.end());
       torch::Tensor input_S_target = torch::tensor(target_S).view({1,nn_dim});
@@ -627,16 +665,28 @@ void NeuralNetworkVes::calculate() {
       grid_bias->setValueAndDerivatives(i,output.item<double>(),force);
     }
    
+  double target_norm=0;
+  if(o_coft){ 
     /*--COMPUTE REWEIGHT FACTOR--*/ 
     double log_sumebv=-1.0e38;
-    double target_norm=0;
     //loop over grid
-    for (Grid::index_t i=0; i<grid_target_ds->getSize(); i++){
+    for (Grid::index_t i=mpi_rank; i<grid_fes->getSize(); i+=mpi_num){
       double log_target = std::log( grid_target_ds->getValue(i) );	        
-      double log_ebv= o_beta * grid_bias->getValue(i) + log_target;     	//beta*V(s)+log p(s)
-      if(i==0) log_sumebv = log_ebv;				//sum exp with previous ones (see func. exp_added)
+      double log_ebv = o_beta * grid_bias->getValue(i) + log_target;     	//beta*V(s)+log p(s)
+      if(i==mpi_rank) log_sumebv = log_ebv;				//sum exp with previous ones (see func. exp_added)
       else exp_added(log_sumebv,log_ebv);
       target_norm += grid_target_ds->getValue(i);
+    }
+    if(mpi_num>1){
+      comm.Sum(target_norm);
+      std::vector<double> all_log_sumebv(mpi_num,0);
+      if(mpi_rank==0){
+        comm.Allgather(log_sumebv,all_log_sumebv);
+        comm.Bcast(all_log_sumebv,0);
+        log_sumebv=all_log_sumebv[0];
+        for(unsigned i=1;i<mpi_num;++i)
+          exp_added(log_sumebv,all_log_sumebv[i]);
+      }
     }
     //compute c(t)
     r_ct = (log_sumebv-std::log(target_norm))/o_beta;
@@ -644,16 +694,25 @@ void NeuralNetworkVes::calculate() {
     //compute rbias
     r_bias = bias_pot-r_ct;
     getPntrToComponent("rbias")->set(r_bias);
-
+  }
     //--COMPUTE KL--
     //normalize bias histogram
     double bias_norm=0;
-    for (Grid::index_t i=0; i<grid_bias_hist->getSize(); i++)
+    for (Grid::index_t i=mpi_rank; i<grid_fes->getSize(); i+=mpi_num){
       bias_norm += grid_bias_hist->getValue(i);
+      if(!o_coft) target_norm += grid_target_ds->getValue(i);
+    }
+    if(mpi_num>1){
+      comm.Sum(bias_norm);
+      if(!o_coft) comm.Sum(target_norm);
+    }
     //compute kl
     double kl=0;
-    for (Grid::index_t i=0; i<grid_bias_hist->getSize(); i++)
+    for (Grid::index_t i=mpi_rank; i<grid_bias_hist->getSize(); i+=mpi_num)
       kl+= (grid_bias_hist->getValue(i) / bias_norm) * std::log( ( grid_bias_hist->getValue(i) / bias_norm ) / ( grid_target_ds->getValue(i) / target_norm ) );
+    
+    if(mpi_num>1)
+      comm.Sum(kl);
     getPntrToComponent("kl")->set(kl);
 
   if(c_iter>c_start_from){
@@ -661,9 +720,10 @@ void NeuralNetworkVes::calculate() {
     if(o_decay>0){
       //if adaptive: rescale it only when the KL is below a threshold
       if(o_adaptive_decay==0 || kl<o_adaptive_decay){
-	float new_lr=dynamic_pointer_cast<torch::optim::Adam, torch::optim::Optimizer>(nn_opt)->options.learning_rate() * o_decay;
-	dynamic_pointer_cast<torch::optim::Adam, torch::optim::Optimizer>(nn_opt)->options.learning_rate( new_lr );
-        getPntrToComponent("lr")->set(new_lr);
+        c_lr_scaling*= o_decay;
+	double current_lr=o_lrate*c_lr_scaling; 
+	dynamic_pointer_cast<torch::optim::Adam, torch::optim::Optimizer>(nn_opt)->options.learning_rate( current_lr );
+        getPntrToComponent("lrscale")->set(c_lr_scaling);
       }
     }
 
@@ -671,7 +731,7 @@ void NeuralNetworkVes::calculate() {
     float sum_exp_beta_F = 0;
     if(o_target > 0 && c_iter % o_target == 0){
       //compute new estimate of the fes
-      for (Grid::index_t i=0; i<grid_fes->getSize(); i++){
+      for (Grid::index_t i=0; i<grid_fes->getSize(); i+=1){
         grid_fes->setValue(i,- grid_bias->getValue(i) + (1./o_gamma) * grid_fes->getValue(i));
         float exp_beta_F = std::exp( (-o_beta/o_gamma) * grid_fes->getValue(i) ); 
 	sum_exp_beta_F += exp_beta_F;
@@ -717,7 +777,24 @@ void NeuralNetworkVes::calculate() {
    /*--INCREMENT COUNTER--*/
    c_iter++; 
  }
+//if static bias:
+} else {
+  //get current CVs
+    vector<double> cv(nn_dim);
+    for(unsigned i=0; i<nn_dim; i++)
+    cv[i]=getArgument(i);
+    bias_pot = grid_bias->getValueAndDerivatives(cv,der); 
 }
+  //set bias
+  setBias(bias_pot);
+  //set forces
+  for (unsigned i=0; i<nn_dim; i++){
+    tot_force2+=pow(der[i],2);
+    setOutputForce(i,-der[i]); //be careful of minus sign
+  }
+  v_ForceTot2->set(tot_force2);
+}
+
 
 std::unique_ptr<Grid> NeuralNetworkVes::createGridFromFile(const std::string& funcl,const std::vector<Value*>& args, const std::string& filename, const std::vector<std::string>& g_min,const std::vector<std::string>& g_max,const std::vector<unsigned>& g_nbins,bool sparsegrid,bool spline)
 {
