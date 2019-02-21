@@ -213,6 +213,7 @@ private:
 /*--counters--*/
   int			c_iter;
   int			c_start_from;
+  bool			c_is_first_step;
   double		c_lr_scaling;
 /*--grids--*/
   std::unique_ptr<Grid> grid_bias,grid_target_ds,grid_bias_hist,grid_fes;
@@ -290,7 +291,8 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
 }
 
 NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
-  PLUMED_BIAS_INIT(ao)
+  PLUMED_BIAS_INIT(ao),
+  c_is_first_step(true)
 {
   //for debugging TODO remove?
   torch::manual_seed(0);
@@ -572,9 +574,22 @@ void NeuralNetworkVes::calculate() {
   double bias_pot=0;
   double tot_force2=0;
   vector<double> der(nn_dim);
+
   //check whether to update the bias or use the one stored in the grid 
   bool static_bias = false; 
   if(c_lr_scaling < 5.e-5) static_bias=true;
+  //check which operations to do
+  bool do_stride, do_coft, do_update_target, do_print, do_save_bias;
+  if(!static_bias){
+    do_stride = ( getStep() % o_stride == 0 );
+    if (do_stride){
+      do_print = ( c_iter % o_print == 0 );
+      do_coft = o_coft;
+      do_update_target = ( o_target > 0 && c_iter % o_target == 0 );
+      do_save_bias = ( do_print || do_update_target );
+    }
+  }
+
 if(!static_bias){
   //get current CVs
   vector<float> current_S(nn_dim);
@@ -616,7 +631,7 @@ if(!static_bias){
   }
 */
   /*--UPDATE PARAMETERS--*/
-  if(getStep()%o_stride==0){
+  if( do_stride ){
     /**Biased ensemble contribution**/
     //normalize average gradient
     for (unsigned i=0; i<g_mean.size(); i++)
@@ -663,25 +678,12 @@ if(!static_bias){
         std::fill(g_target[i].begin(), g_target[i].end(), 0.);
     }
     //update the parameters
-    if(c_iter>c_start_from)
+    if( !c_is_first_step )
       nn_opt->step();
 
-    /*--SAVE BIAS INTO THE GRID--*/
-    for (Grid::index_t i=0; i<grid_fes->getSize(); i+=1){
-      vector<double> point_S=grid_target_ds->getPoint(i);
-      vector<float> target_S(point_S.begin(),point_S.end());
-      torch::Tensor input_S_target = torch::tensor(target_S).view({1,nn_dim});
-      input_S_target.set_requires_grad(true);
-      nn_opt->zero_grad();
-      output = nn_model->forward( input_S_target );
-      output.backward();
-      vector<double> force=tensor_to_vector_d( input_S_target.grad() );
-      grid_bias->setValueAndDerivatives(i,output.item<double>(),force);
-    }
-   
-  double target_norm=0;
-  if(o_coft){ 
     /*--COMPUTE REWEIGHT FACTOR--*/ 
+    double target_norm=0;
+    if( do_coft ){ 
     double log_sumebv=-1.0e38;
     //loop over grid
     for (Grid::index_t i=mpi_rank; i<grid_fes->getSize(); i+=mpi_num){
@@ -709,7 +711,23 @@ if(!static_bias){
     r_bias = bias_pot-r_ct;
     getPntrToComponent("rbias")->set(r_bias);
   }
-    //--COMPUTE KL--
+
+    /*--SAVE BIAS INTO THE GRID--*/
+  if( do_save_bias ){ 
+    for (Grid::index_t i=0; i<grid_fes->getSize(); i+=1){
+      vector<double> point_S=grid_target_ds->getPoint(i);
+      vector<float> target_S(point_S.begin(),point_S.end());
+      torch::Tensor input_S_target = torch::tensor(target_S).view({1,nn_dim});
+      input_S_target.set_requires_grad(true);
+      nn_opt->zero_grad();
+      output = nn_model->forward( input_S_target );
+      output.backward();
+      vector<double> force=tensor_to_vector_d( input_S_target.grad() );
+      grid_bias->setValueAndDerivatives(i,output.item<double>(),force);
+    }
+  }
+
+      //--COMPUTE KL--
     //get current weight
     float weight=getStep()+1;
     if (o_tau>0 ) //&& weight>o_tau)
@@ -745,7 +763,7 @@ if(!static_bias){
       comm.Sum(kl);
     getPntrToComponent("kl")->set(kl);
 
-  if(c_iter>c_start_from){
+  if( c_is_first_step ){
     /*--LEARNING RATE DECAY--*/
     if(o_decay>0){
       //if adaptive: rescale it only when the KL is below a threshold
@@ -759,7 +777,7 @@ if(!static_bias){
 
     /*--UPDATE TARGET DISTRIBUTION--*/ 
     float sum_exp_beta_F = 0;
-    if(o_target > 0 && c_iter % o_target == 0){
+    if( do_update_target ){
       //compute new estimate of the fes
       for (Grid::index_t i=0; i<grid_fes->getSize(); i+=1){
         grid_fes->setValue(i,- grid_bias->getValue(i) + (1./o_gamma) * grid_fes->getValue(i));
@@ -770,7 +788,7 @@ if(!static_bias){
       grid_target_ds->scaleAllValuesAndDerivatives( 1./sum_exp_beta_F );
     }
 
-    if( c_iter % o_print == 0 ){
+    if( do_print ){
     /*--PRINT GRIDS TO FILE--*/
       OFile ofile;
       ofile.link(*this);
@@ -806,6 +824,7 @@ if(!static_bias){
 
    /*--INCREMENT COUNTER--*/
    c_iter++; 
+
  }
 //if static bias:
 } else {
@@ -822,7 +841,11 @@ if(!static_bias){
     tot_force2+=pow(der[i],2);
     setOutputForce(i,-der[i]); //be careful of minus sign
   }
-  v_ForceTot2->set(tot_force2);
+  v_ForceTot2->set(tot_force2); 
+
+  if(c_is_first_step)
+     c_is_first_step=false;
+
 }
 
 
