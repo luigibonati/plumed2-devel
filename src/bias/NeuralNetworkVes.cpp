@@ -221,6 +221,7 @@ private:
   vector<float>		g_ds;
   vector<unsigned>	g_nbins;
   vector<unsigned>	g_counter;
+  double		g_target_norm;
 /*--reweight--*/
   float 		r_ct; 
   float 		r_bias;
@@ -292,7 +293,8 @@ void NeuralNetworkVes::registerKeywords(Keywords& keys) {
 
 NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   PLUMED_BIAS_INIT(ao),
-  c_is_first_step(true)
+  c_is_first_step(true),
+  g_target_norm(0.)
 {
   //for debugging TODO remove?
   torch::manual_seed(0);
@@ -556,7 +558,7 @@ NeuralNetworkVes::NeuralNetworkVes(const ActionOptions&ao):
   if(o_decay>0) log.printf("  - with a decaying constant, with multiplier: %g\n",o_decay);
   if(o_adaptive_decay>0) log.printf("  - only when the KL divergence is below: %g\n",o_adaptive_decay); 
   if(o_tau==0) log.printf("  KL divergence between biased and target is calculated using all data from the simulation.\n");
-  else log.printf("  KL divergence between biased and target is calculated with an exponential decaying average with decay time: %d (%d iterations)\n",o_tau,o_tau/o_stride);
+  else log.printf("  KL divergence between biased and target is calculated with an exponential decaying average with decay time of  %d (%d iterations)\n",o_tau*o_stride,o_tau);
   log.printf("  -- VES SETUP SETUP --\n");
   log.printf("  Stride : %d\n",o_stride);
   log.printf("  Target distribution : ");
@@ -580,15 +582,14 @@ void NeuralNetworkVes::calculate() {
   if(c_lr_scaling < 5.e-5) static_bias=true;
   //check which operations to do
   bool do_stride, do_coft, do_update_target, do_print, do_save_bias;
-  if(!static_bias){
-    do_stride = ( getStep() % o_stride == 0 );
-    if (do_stride){
-      do_print = ( c_iter % o_print == 0 );
-      do_coft = o_coft;
-      do_update_target = ( o_target > 0 && c_iter % o_target == 0 );
-      do_save_bias = ( do_print || do_update_target );
-    }
+  do_stride = ( getStep() % o_stride == 0 );
+  if (do_stride && !static_bias ){
+    do_print = ( c_iter % o_print == 0 );
+    do_coft = o_coft;
+    do_update_target = ( o_target > 0 && c_iter % o_target == 0 );
+    do_save_bias = ( do_print || do_update_target );
   }
+  
 
 if(!static_bias){
   //get current CVs
@@ -682,7 +683,7 @@ if(!static_bias){
       nn_opt->step();
 
     /*--COMPUTE REWEIGHT FACTOR--*/ 
-    double target_norm=0;
+    g_target_norm=0;
     if( do_coft ){ 
     double log_sumebv=-1.0e38;
     //loop over grid
@@ -691,10 +692,10 @@ if(!static_bias){
       double log_ebv = o_beta * grid_bias->getValue(i) + log_target;     	//beta*V(s)+log p(s)
       if(i==mpi_rank) log_sumebv = log_ebv;				//sum exp with previous ones (see func. exp_added)
       else exp_added(log_sumebv,log_ebv);
-      target_norm += grid_target_ds->getValue(i);
+      g_target_norm += grid_target_ds->getValue(i);
     }
     if(mpi_num>1){
-      comm.Sum(target_norm);
+      comm.Sum(g_target_norm);
       std::vector<double> all_log_sumebv(mpi_num,0);
       if(mpi_rank==0){
         comm.Allgather(log_sumebv,all_log_sumebv);
@@ -705,7 +706,7 @@ if(!static_bias){
       }
     }
     //compute c(t)
-    r_ct = (log_sumebv-std::log(target_norm))/o_beta;
+    r_ct = (log_sumebv-std::log(g_target_norm))/o_beta;
     getPntrToComponent("rct")->set(r_ct); 
     //compute rbias
     r_bias = bias_pot-r_ct;
@@ -727,7 +728,7 @@ if(!static_bias){
     }
   }
 
-      //--COMPUTE KL--
+    //--COMPUTE KL--
     //get current weight
     float weight=getStep()+1;
     if (o_tau>0 ) //&& weight>o_tau)
@@ -739,7 +740,7 @@ if(!static_bias){
       double new_value = h+(g_counter[i]-o_stride*h)/weight;
       bias_norm+=new_value;
       grid_bias_hist->setValue(i,new_value);
-      if(!o_coft) target_norm += grid_target_ds->getValue(i);
+      if(!o_coft) g_target_norm += grid_target_ds->getValue(i);
     }
     std::fill(g_counter.begin(), g_counter.end(), 0); 
 /*
@@ -757,13 +758,14 @@ if(!static_bias){
     //compute kl
     double kl=0;
     for (Grid::index_t i=mpi_rank; i<grid_bias_hist->getSize(); i+=mpi_num)
-      kl+= (grid_bias_hist->getValue(i) / bias_norm) * std::log( ( grid_bias_hist->getValue(i) / bias_norm ) / ( grid_target_ds->getValue(i) / target_norm ) );
+      kl+= (grid_bias_hist->getValue(i) / bias_norm) * std::log( ( grid_bias_hist->getValue(i) / bias_norm ) / ( grid_target_ds->getValue(i) / g_target_norm ) );
+      //kl+= ( grid_target_ds->getValue(i) / target_norm ) * std::log( ( grid_target_ds->getValue(i) / target_norm ) / ( grid_bias_hist->getValue(i) / bias_norm )  );
     
     if(mpi_num>1)
       comm.Sum(kl);
     getPntrToComponent("kl")->set(kl);
 
-  if( c_is_first_step ){
+  if( !c_is_first_step ){
     /*--LEARNING RATE DECAY--*/
     if(o_decay>0){
       //if adaptive: rescale it only when the KL is below a threshold
@@ -829,10 +831,40 @@ if(!static_bias){
 //if static bias:
 } else {
   //get current CVs
-    vector<double> cv(nn_dim);
-    for(unsigned i=0; i<nn_dim; i++)
+  vector<double> cv(nn_dim);
+  for(unsigned i=0; i<nn_dim; i++)
     cv[i]=getArgument(i);
-    bias_pot = grid_bias->getValueAndDerivatives(cv,der); 
+  bias_pot = grid_bias->getValueAndDerivatives(cv,der); 
+  //accumulate histogram for kl 
+  Grid::index_t current_index = grid_bias_hist->getIndex(cv);
+  g_counter[current_index] ++;
+  //compute KL every stride
+  if(do_stride){
+  //--COMPUTE KL--
+  //get current weight
+  float weight=getStep()+1;
+  if (o_tau>0 ) //&& weight>o_tau)
+    weight=o_tau;
+
+  double bias_norm=0;
+  //g_target_norm=0;
+  for (Grid::index_t i=0; i<grid_bias_hist->getSize(); i+=1){
+    double h = grid_bias_hist->getValue(i);
+    double new_value = h+(g_counter[i]-o_stride*h)/weight;
+    bias_norm+=new_value;
+    grid_bias_hist->setValue(i,new_value);
+    //if(!o_coft) g_target_norm += grid_target_ds->getValue(i);
+  }
+  std::fill(g_counter.begin(), g_counter.end(), 0); 
+  //compute kl
+  double kl=0;
+  for (Grid::index_t i=mpi_rank; i<grid_bias_hist->getSize(); i+=mpi_num)
+    kl+= (grid_bias_hist->getValue(i) / bias_norm) * std::log( ( grid_bias_hist->getValue(i) / bias_norm ) / ( grid_target_ds->getValue(i) / g_target_norm ) );
+
+  if(mpi_num>1)
+    comm.Sum(kl);
+  getPntrToComponent("kl")->set(kl);  
+  } 
 }
   //set bias
   setBias(bias_pot);
