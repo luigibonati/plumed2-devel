@@ -84,12 +84,12 @@ PytorchModel::PytorchModel(const ActionOptions&ao):
   std::string fname="model.pt";
   parse("MODEL",fname);  
 
+  //deserialize the model from file
   try {
-    // Deserialize the ScriptModule from a file using torch::jit::load().
     _model = torch::jit::load(fname);
   }
   catch (const c10::Error& e) {
-    std::cerr << "error loading the model\n";
+    error("Cannot find Pytorch model.");    
   }
 
   checkRead();
@@ -104,16 +104,17 @@ PytorchModel::PytorchModel(const ActionOptions&ao):
   vector<float> cvs = tensor_to_vector (output);
   _n_out=cvs.size();
 
-  //log.printf("  without periodic boundary conditions\n");
+  //create components
   for(unsigned j=0; j<_n_out; j++){
     string name_comp = "node-" + std::to_string(j);
     addComponentWithDerivatives( name_comp );
     componentIsNotPeriodic( name_comp );
   }
-
-  log.printf("Pytorch Model Loaded: %s\n",fname);
-  log.printf("Number of input: %d\n",_n_in); 
-  log.printf("Number of outputs: %d\n",_n_out); 
+ 
+  //print log
+  //log.printf("Pytorch Model Loaded: %s \n",fname);
+  log.printf("Number of input: %d \n",_n_in); 
+  log.printf("Number of outputs: %d \n",_n_out); 
 
 }
 
@@ -127,16 +128,17 @@ void PytorchModel::calculate() {
   //convert to Ivalue
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back( input_S );
-  //encode
+  //calculate output
   auto output = _model.forward( inputs ).toTensor();
+  //backpropagation
   output.backward();
-
+  //convert to vectors
   vector<float> cvs = tensor_to_vector (output);
   vector<float> der = tensor_to_vector (input_S.grad() );
-
+  //set derivatives
   for(unsigned i=0; i<_n_in; i++)
     setDerivative(i,der[i]);
-
+  //set CVs values
   for(unsigned j=0; j<_n_out; j++)
     getPntrToComponent("node-"+std::to_string(j))->set(cvs[j]);
   
