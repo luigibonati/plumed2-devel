@@ -79,11 +79,13 @@ PytorchModel::PytorchModel(const ActionOptions&ao):
   Action(ao),
   Function(ao)
 {
+  //number of inputs of the model
   _n_in=getNumberOfArguments();
 
+  //parse model name
   std::string fname="model.pt";
-  parse("MODEL",fname);  
-
+  parse("MODEL",fname); 
+ 
   //deserialize the model from file
   try {
     _model = torch::jit::load(fname);
@@ -100,13 +102,13 @@ PytorchModel::PytorchModel(const ActionOptions&ao):
   torch::Tensor single_input = torch::tensor(input_test).view({1,_n_in});  
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back( single_input );
-  auto output = _model.forward( inputs ).toTensor(); 
+  torch::Tensor output = _model.forward( inputs ).toTensor(); 
   vector<float> cvs = tensor_to_vector (output);
   _n_out=cvs.size();
 
   //create components
   for(unsigned j=0; j<_n_out; j++){
-    string name_comp = "node-" + std::to_string(j);
+    string name_comp = "node-"+std::to_string(j);
     addComponentWithDerivatives( name_comp );
     componentIsNotPeriodic( name_comp );
   }
@@ -122,6 +124,8 @@ void PytorchModel::calculate() {
 
   //retrieve arguments
   vector<float> current_S(_n_in);
+  for(unsigned i=0; i<_n_in; i++)
+    current_S[i]=getArgument(i);
   //convert to tensor
   torch::Tensor input_S = torch::tensor(current_S).view({1,_n_in});
   input_S.set_requires_grad(true);
@@ -129,19 +133,20 @@ void PytorchModel::calculate() {
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back( input_S );
   //calculate output
-  auto output = _model.forward( inputs ).toTensor();
+  torch::Tensor output = _model.forward( inputs ).toTensor();
   //backpropagation
   output.backward();
-  //convert to vectors
+  //convert to vector
   vector<float> cvs = tensor_to_vector (output);
   vector<float> der = tensor_to_vector (input_S.grad() );
   //set derivatives
   for(unsigned i=0; i<_n_in; i++)
     setDerivative(i,der[i]);
   //set CVs values
-  for(unsigned j=0; j<_n_out; j++)
-    getPntrToComponent("node-"+std::to_string(j))->set(cvs[j]);
-  
+  for(unsigned j=0; j<_n_out; j++){
+    string name_comp = "node-"+std::to_string(j);
+    getPntrToComponent(name_comp)->set(cvs[j]);
+  }
 }
 
 }
