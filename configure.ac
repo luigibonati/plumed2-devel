@@ -263,6 +263,7 @@ PLUMED_CONFIG_ENABLE([gsl],[search for gsl],[yes])
 PLUMED_CONFIG_ENABLE([xdrfile],[search for xdrfile],[yes])
 PLUMED_CONFIG_ENABLE([boost_graph],[search for boost graph],[no])
 PLUMED_CONFIG_ENABLE([boost_serialization],[search for boost serialization],[no])
+PLUMED_CONFIG_ENABLE([libtorch],[search for libtorch],[no])
 PLUMED_CONFIG_ENABLE([fftw],[search for fftw],[yes])
 PLUMED_CONFIG_ENABLE([python],[search for python],[yes])
 PLUMED_CONFIG_ENABLE([af_ocl],[search for arrayfire_ocl],[no])
@@ -792,6 +793,17 @@ fi
 
 if test $fftw == true ; then
   PLUMED_CHECK_PACKAGE([fftw3.h],[fftw_execute],[__PLUMED_HAS_FFTW],[fftw3])
+fi
+
+if test $libtorch == true ; then
+  PLUMED_CHECK_CXX_PACKAGE([libtorch],[
+#include <torch/script.h>
+#include <torch/torch.h>
+int main() {
+  torch::Tensor tensor = torch::rand({2, 3});
+  return 0;
+}
+  ], [__PLUMED_HAS_LIBTORCH])
 fi
 
 if test $python == true  ; then
