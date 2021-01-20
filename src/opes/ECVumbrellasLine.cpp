@@ -22,13 +22,41 @@ namespace opes {
 
 //+PLUMEDOC EXPANSION_CV ECV_UMBRELLAS_LINE
 /*
-Place Gaussian umbrellas on a line.
+Target a multiumbrella ensemble, by combining systems each with a parabolic bias potential at a different location.
+
+Any set of collective variables \f$\mathbf{s}\f$ can be used as ARG.
+\f[
+  \Delta u_{\mathbf{s}_i}(\mathbf{s})=\sum_j^{\text{dim}}\frac{([s]_j-[s_i]_j)^2}{2\sigma^2}\, .
+\f]
+The Gaussian umbrellas are placed along a line, from MIN_CV to MAX_CV.
+The umbrellas are placed at a distance SIGMA*SPACING from each other, if you need more flexibility use \ref ECV_UMBRELLAS_FILE.
+The unbiased fluctuations in the basin usually are a reasonable guess for the value of SIGMA.
 The umbrellas can be multidimensional, but you should rescale the dimensions so that a single SIGMA can be used.
-Can be used with any Colvar as ARG.
+
+The keyword BARRIER can be helpful to avoid breaking your system due to a too strong initial bias.
+If you think the placed umbrellas will not cover the whole unbiased probability distribution you should add it explicitly to the target, with the flag ADD_P0, for more robust convergence.
+See also Appendix B of Ref.\cite Invernizzi2020unified for more details on these last two options.
 
 \par Examples
 
-us: ECV_UMBRELLAS_LINE ARG=cv MIN_CV=-1 MAX_CV=1 SIMGA=0.1
+\plumedfile
+cv: DISTANCE ATOMS=1,2
+ecv: ECV_UMBRELLAS_LINE ARG=cv MIN_CV=1.2 MAX_CV=4.3 SIGMA=0.5 SPACING=1.5
+opes: OPES_EXPANDED ARG=ecv.* PACE=500
+\endplumedfile
+
+It is also possible to combine different ECV_UMBRELLAS_LINE to build a grid of CV values that will be sampled.
+For example the following code will sample a whole 2D region of cv1 and cv2.
+
+\plumedfile
+cv1: DISTANCE ATOMS=1,2
+ecv2: ECV_UMBRELLAS_LINE ARG=cv1 MIN_CV=1.2 MAX_CV=4.3 SIGMA=0.5
+
+cv2: DISTANCE ATOMS=3,4
+ecv1: ECV_UMBRELLAS_LINE ARG=cv2 MIN_CV=13.8 MAX_CV=21.4 SIGMA=4.3
+
+opes: OPES_EXPANDED ARG=ecv1.*,ecv2.* PACE=500
+\endplumedfile
 
 */
 //+ENDPLUMEDOC
@@ -37,11 +65,14 @@ class ECVumbrellasLine :
   public ExpansionCVs
 {
 private:
-  double sigma_;
   unsigned P0_contribution_;
-  std::vector<std::vector <double> > centers_; //FIXME is this efficient??
-  std::vector<std::vector <double> > ECVs_;
-  std::vector<std::vector <double> > derECVs_;
+  double barrier_;
+
+  std::vector< std::vector<double> > centers_;
+  double sigma_;
+
+  std::vector< std::vector<double> > ECVs_;
+  std::vector< std::vector<double> > derECVs_;
   void initECVs();
 
 public:
@@ -50,7 +81,6 @@ public:
   void calculateECVs(const double *) override;
   const double * getPntrToECVs(unsigned) override;
   const double * getPntrToDerECVs(unsigned) override;
-  std::vector< std::vector<unsigned> > getIndex_k() const override;
   std::vector<std::string> getLambdas() const override;
   void initECVs_observ(const std::vector<double>&,const unsigned,const unsigned) override;
   void initECVs_restart(const std::vector<std::string>&) override;
@@ -58,7 +88,8 @@ public:
 
 PLUMED_REGISTER_ACTION(ECVumbrellasLine,"ECV_UMBRELLAS_LINE")
 
-void ECVumbrellasLine::registerKeywords(Keywords& keys) {
+void ECVumbrellasLine::registerKeywords(Keywords& keys)
+{
   ExpansionCVs::registerKeywords(keys);
   keys.use("ARG");
   keys.add("compulsory","MIN_CV","the minimum of the CV range to be explored");
@@ -66,6 +97,7 @@ void ECVumbrellasLine::registerKeywords(Keywords& keys) {
   keys.add("compulsory","SIGMA","sigma of the umbrella Gaussians");
   keys.add("compulsory","SPACING","1","the distance between umbrellas, in units of SIGMA");
   keys.addFlag("ADD_P0",false,"add the unbiased Boltzmann distribution to the target distribution, to make sure to sample it");
+  keys.add("optional","BARRIER","a guess of the free energy barrier to be overcome (better to stay higher than lower)");
 }
 
 ECVumbrellasLine::ECVumbrellasLine(const ActionOptions&ao):
@@ -79,6 +111,11 @@ ECVumbrellasLine::ECVumbrellasLine(const ActionOptions&ao):
     P0_contribution_=1;
   else
     P0_contribution_=0;
+
+//set barrier_
+  barrier_=std::numeric_limits<double>::infinity();
+  parse("BARRIER",barrier_);
+
 //set umbrellas
   parse("SIGMA",sigma_);
   std::vector<double> min_cv;
@@ -113,11 +150,14 @@ ECVumbrellasLine::ECVumbrellasLine(const ActionOptions&ao):
   log.printf("  total number of umbrellas = %u\n",sizeUmbrellas);
   log.printf("    with SIGMA = %g\n",sigma_);
   log.printf("    and SPACING = %g\n",spacing);
+  if(barrier_!=std::numeric_limits<double>::infinity())
+    log.printf("  guess for free energy BARRIER = %g\n",barrier_);
   if(P0_contribution_==1)
     log.printf(" -- ADD_P0: the target includes also the unbiased probability itself\n");
 }
 
-void ECVumbrellasLine::calculateECVs(const double * cv) {
+void ECVumbrellasLine::calculateECVs(const double * cv)
+{
   for(unsigned j=0; j<getNumberOfArguments(); j++)
   {
     for(unsigned k=P0_contribution_; k<totNumECVs_; k++) //if ADD_P0, the first ECVs=0
@@ -142,15 +182,6 @@ const double * ECVumbrellasLine::getPntrToDerECVs(unsigned j)
   plumed_massert(isReady_,"cannot access ECVs before initialization");
   plumed_massert(j<getNumberOfArguments(),getName()+" has fewer CVs");
   return &derECVs_[j][0];
-}
-
-std::vector< std::vector<unsigned> > ECVumbrellasLine::getIndex_k() const
-{
-  std::vector< std::vector<unsigned> > index_k(totNumECVs_,std::vector<unsigned>(getNumberOfArguments()));
-  for(unsigned k=0; k<totNumECVs_; k++)
-    for(unsigned j=0; j<getNumberOfArguments(); j++)
-      index_k[k][j]=k; //this is trivial, since each center has a unique set of CVs
-  return index_k;
 }
 
 std::vector<std::string> ECVumbrellasLine::getLambdas() const
@@ -187,7 +218,7 @@ void ECVumbrellasLine::initECVs_observ(const std::vector<double>& all_obs_cvs,co
 {
   //this non-linear exansion never uses automatic initialization
   initECVs();
-  calculateECVs(&all_obs_cvs[index_j]);
+  calculateECVs(&all_obs_cvs[index_j]); //use only first obs point
   for(unsigned j=0; j<getNumberOfArguments(); j++)
     for(unsigned k=P0_contribution_; k<totNumECVs_; k++)
       ECVs_[j][k]=std::min(barrier_/kbt_,ECVs_[j][k]);
@@ -197,9 +228,9 @@ void ECVumbrellasLine::initECVs_restart(const std::vector<std::string>& lambdas)
 {
   std::size_t pos=0;
   for(unsigned j=0; j<getNumberOfArguments()-1; j++)
-    pos = lambdas[0].find("_", pos+1); //checking only lambdas[0] is hopefully enough
+    pos=lambdas[0].find("_",pos+1); //checking only lambdas[0] is hopefully enough
   plumed_massert(pos<lambdas[0].length(),"this should not happen, fewer '_' than expected in "+getName());
-  pos = lambdas[0].find("_", pos+1);
+  pos=lambdas[0].find("_",pos+1);
   plumed_massert(pos>lambdas[0].length(),"this should not happen, more '_' than expected in "+getName());
 
   std::vector<std::string> myLambdas=getLambdas();

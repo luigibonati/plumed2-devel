@@ -14,23 +14,22 @@ GNU Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with plumed.  If not, see <http://www.gnu.org/licenses/>.
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
+#include "ExpansionCVs.h"
+
 #include "tools/OpenMP.h"
 #include "core/PlumedMain.h"
 #include "core/Atoms.h"
 
-#include "ExpansionCVs.h"
-
 namespace PLMD {
 namespace opes {
 
-void ExpansionCVs::registerKeywords(Keywords& keys) {
+void ExpansionCVs::registerKeywords(Keywords& keys)
+{
   Action::registerKeywords(keys);
   ActionWithValue::registerKeywords(keys);
   ActionWithArguments::registerKeywords(keys);
   ActionWithValue::useCustomisableComponents(keys);
   keys.add("compulsory","TEMP","-1","temperature. If not specified tries to get it from MD engine");
-  keys.add("optional","BARRIER","a guess of the free energy barrier to be overcome (better to stay higher than lower)");
-//  keys.reserve("compulsory","PERIODIC","NO","if the output of your ECVs is periodic then you should specify the periodicity.");
 }
 
 ExpansionCVs::ExpansionCVs(const ActionOptions&ao)
@@ -54,36 +53,33 @@ ExpansionCVs::ExpansionCVs(const ActionOptions&ao)
   plumed_massert(kbt_>0,"your MD engine does not pass the temperature to plumed, you must specify it using TEMP");
   log.printf("  temperature = %g, beta = %g\n",kbt_/Kb,1./kbt_);
 
-//set barrier_
-  barrier_=std::numeric_limits<double>::infinity();
-  parse("BARRIER",barrier_);
-  if(barrier_!=std::numeric_limits<double>::infinity())
-    log.printf("  guess for free energy BARRIER = %g\n",barrier_);
-
 //set components
   plumed_massert( getNumberOfArguments()!=0, "you must specify the underlying CV");
-  for(unsigned i=0; i<getNumberOfArguments(); i++)
+  for(unsigned j=0; j<getNumberOfArguments(); j++)
   {
-    std::string name_i=getPntrToArgument(i)->getName();
-    ActionWithValue::addComponentWithDerivatives(name_i);
-    getPntrToComponent(i)->setNotPeriodic();
-    getPntrToComponent(i)->resizeDerivatives(getNumberOfArguments());
+    std::string name_j=getPntrToArgument(j)->getName();
+    ActionWithValue::addComponentWithDerivatives(name_j);
+    getPntrToComponent(j)->resizeDerivatives(1);
+    if(getPntrToArgument(j)->isPeriodic()) //it should not be necessary, but why not
+    {
+      std::string min,max;
+      getPntrToArgument(j)->getDomain(min,max);
+      getPntrToComponent(j)->setDomain(min,max);
+    }
+    else
+      getPntrToComponent(j)->setNotPeriodic();
   }
+  plumed_massert((int)getNumberOfArguments()==getNumberOfComponents(),"Expansion CVs have same number of arguments and components");
 }
 
 void ExpansionCVs::calculate()
 {
   std::vector<double> args(getNumberOfArguments());
-  for(unsigned i=0; i<getNumberOfArguments(); i++)
+  for(unsigned j=0; j<getNumberOfArguments(); j++)
   {
-    Value *v_i=getPntrToComponent(i);
-    args[i]=getArgument(i);
-    v_i->set(args[i]);
-    for(unsigned j=0; j<getNumberOfArguments(); j++)
-    {
-      const double der_ij=(i==j?1:0);
-      v_i->addDerivative(j,der_ij);
-    }
+    args[j]=getArgument(j);
+    getPntrToComponent(j)->set(args[j]); //components are equal to arguments
+    getPntrToComponent(j)->addDerivative(0,1.); //the derivative of the identity is 1
   }
   if(isReady_)
     calculateECVs(&args[0]);
@@ -91,41 +87,43 @@ void ExpansionCVs::calculate()
 
 void ExpansionCVs::apply()
 {
-  const unsigned noa=getNumberOfArguments();
-  const unsigned ncp=getNumberOfComponents();
-  const unsigned cgs=comm.Get_size();
-
-  std::vector<double> f(noa,0.0);
-
-  unsigned stride=1;
-  unsigned rank=0;
-  if(ncp>4*cgs) {
-    stride=comm.Get_size();
-    rank=comm.Get_rank();
-  }
-
-  unsigned at_least_one_forced=0;
-  #pragma omp parallel num_threads(OpenMP::getNumThreads()) shared(f)
+  for(unsigned j=0; j<getNumberOfArguments(); j++)
   {
-    std::vector<double> omp_f(noa,0.0);
-    std::vector<double> forces(noa);
-    #pragma omp for reduction( + : at_least_one_forced)
-    for(unsigned i=rank; i<ncp; i+=stride) {
-      if(getPntrToComponent(i)->applyForce(forces)) {
-        at_least_one_forced+=1;
-        for(unsigned j=0; j<noa; j++) omp_f[j]+=forces[j];
-      }
-    }
-    #pragma omp critical
-    for(unsigned j=0; j<noa; j++) f[j]+=omp_f[j];
+    std::vector<double> force_j(1);
+    if(getPntrToComponent(j)->applyForce(force_j)) //a bias is applied?
+      getPntrToArgument(j)->addForce(force_j[0]); //just tell it to the CV!
   }
-
-  if(noa>0&&ncp>4*cgs) { comm.Sum(&f[0],noa); comm.Sum(at_least_one_forced); }
-
-  if(at_least_one_forced>0) for(unsigned i=0; i<noa; ++i) getPntrToArgument(i)->addForce(f[i]);
 }
 
-unsigned ExpansionCVs::estimate_steps(const double left_side,const double right_side,const std::vector<double>& obs,const std::string msg) const
+std::vector< std::vector<unsigned> > ExpansionCVs::getIndex_k() const
+{
+  plumed_massert(isReady_ && totNumECVs_>0,"cannot access getIndex_k() of ECV before initialization");
+  std::vector< std::vector<unsigned> > index_k(totNumECVs_,std::vector<unsigned>(getNumberOfArguments()));
+  for(unsigned k=0; k<totNumECVs_; k++)
+    for(unsigned j=0; j<getNumberOfArguments(); j++)
+      index_k[k][j]=k; //each CV gives rise to the same number of ECVs
+  return index_k;
+}
+
+//following methods are meant to be used only in case of linear expansions
+void ExpansionCVs::setSteps(std::vector<double>& lambda,const unsigned steps_lambda,const std::string& msg)
+{
+  plumed_massert(lambda.size()==2,"buggy ECV: min and max "+msg+" should be given to setSteps");
+  const double min_lambda=lambda[0];
+  const double max_lambda=lambda[1];
+  plumed_massert(!(min_lambda==max_lambda && steps_lambda>1),"cannot have multiple STEPS_"+msg+" if MIN_"+msg+"==MAX_"+msg);
+  lambda.resize(steps_lambda);
+  if(steps_lambda==1)
+  {
+    lambda[0]=(min_lambda+max_lambda)/2.;
+    log.printf(" +++ WARNING +++ using one single %s as target = %g\n",msg.c_str(),lambda[0]);
+  }
+  else
+    for(unsigned k=0; k<lambda.size(); k++)
+      lambda[k]=min_lambda+k*(max_lambda-min_lambda)/(steps_lambda-1);
+}
+
+unsigned ExpansionCVs::estimateSteps(const double left_side,const double right_side,const std::vector<double>& obs,const std::string& msg) const
 { //for linear expansions only, it uses Neff to estimate the grid spacing
   if(left_side==0 && right_side==0)
   {
@@ -135,7 +133,7 @@ unsigned ExpansionCVs::estimate_steps(const double left_side,const double right_
   auto get_neff_HWHM=[](const double side,const std::vector<double>& obs,const double av_obs) //HWHM = half width at half maximum. neff is in general not symmetric
   {
     //func: Neff/N-0.5 is a function between -0.5 and 0.5
-    auto func=[](const long double delta,const std::vector<double> obs, const double av_obs)
+    auto func=[](const long double delta,const std::vector<double>& obs, const double av_obs)
     {
       long double sum_w=0;
       long double sum_w2=0;
@@ -156,7 +154,7 @@ unsigned ExpansionCVs::estimate_steps(const double left_side,const double right_
     double func_b=func(side,obs,av_obs);
     if(func_b>=0)
       return 0.0; //no zero is present!
-    if(b<0)//left side case
+    if(b<0) //left side case
     {
       std::swap(a,b);
       std::swap(func_a,func_b);
@@ -176,7 +174,7 @@ unsigned ExpansionCVs::estimate_steps(const double left_side,const double right_
         func_b=func_c;
       }
       c=(a*func_b-b*func_a)/(func_b-func_a);
-      func_c=func(c,obs,av_obs);//func is evaluated only here, it might be expensive
+      func_c=func(c,obs,av_obs); //func is evaluated only here, it might be expensive
     }
     return std::abs(c);
   };
@@ -220,16 +218,6 @@ unsigned ExpansionCVs::estimate_steps(const double left_side,const double right_
   unsigned steps=std::ceil(std::abs(right_side-left_side)/grid_spacing);
   plumed_massert(steps>1,"something went wrong and estimated grid spacing for "+msg+" gives a step="+std::to_string(steps));
   return steps;
-}
-
-std::vector< std::vector<unsigned> > ExpansionCVs::getIndex_k() const
-{
-  plumed_massert(isReady_ && totNumECVs_>0,"cannot access getIndex_k() of ECV before initialization");
-  plumed_massert(getNumberOfArguments()==1,"buggy ECV: you should override getIndex_k() if you have more than one ARG");
-  std::vector< std::vector<unsigned> > index_k(totNumECVs_,std::vector<unsigned>(1));
-  for(unsigned k=0; k<totNumECVs_; k++)
-    index_k[k][0]=k; //it is trivial when only one ARG is used
-  return index_k;
 }
 
 }

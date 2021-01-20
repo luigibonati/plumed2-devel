@@ -25,7 +25,9 @@ namespace opes {
 
 /*
 \ingroup INHERIT
-This is the abstract base class to use for implementing new expansion CVs
+This is the abstract base class to use for implementing expansion CVs (ECVs).
+ECVs should be used together with the OPESexpanded action.
+They take as argument regular CVs, and output them as components without modification.
 */
 
 class ExpansionCVs:
@@ -35,9 +37,11 @@ class ExpansionCVs:
 protected:
   bool isReady_; //true only after initECVs
   double kbt_;
-  double barrier_;
   unsigned totNumECVs_;
-  unsigned estimate_steps(const double,const double,const std::vector<double>&,const std::string) const; //for linear expansions
+
+//methods useful for linear expansions
+  void setSteps(std::vector<double>&,const unsigned,const std::string&);
+  unsigned estimateSteps(const double,const double,const std::vector<double>&,const std::string&) const;
 
 public:
   explicit ExpansionCVs(const ActionOptions&);
@@ -45,11 +49,11 @@ public:
   void apply() override;
   void calculate() override;
   static void registerKeywords(Keywords&);
-  unsigned getNumberOfDerivatives() override {return getNumberOfArguments();};
+  inline unsigned getNumberOfDerivatives() override {return 1;};
 
-  double getKbT() const {return kbt_;};
-  unsigned getTotNumECVs() const {plumed_massert(isReady_,"cannot ask for totNumECVs before ECV isReady"); return totNumECVs_;};
-  virtual std::vector< std::vector<unsigned> > getIndex_k() const;
+  inline double getKbT() const {return kbt_;};
+  inline unsigned getTotNumECVs() const {plumed_massert(isReady_,"cannot ask for totNumECVs before ECV isReady"); return totNumECVs_;};
+  virtual std::vector< std::vector<unsigned> > getIndex_k() const; //might need to override this
 
   virtual void calculateECVs(const double *) = 0;
   virtual const double * getPntrToECVs(unsigned) = 0;
