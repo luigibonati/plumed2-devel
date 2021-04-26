@@ -30,7 +30,7 @@
 using namespace std;
 
 std::vector<float> tensor_to_vector(const torch::Tensor& x) {
-    return std::vector<float>(x.data<float>(), x.data<float>() + x.numel());
+    return std::vector<float>(x.data_ptr<float>(), x.data_ptr<float>() + x.numel());
 }
 
 namespace PLMD {
