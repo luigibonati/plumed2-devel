@@ -91,7 +91,7 @@ PytorchModel::PytorchModel(const ActionOptions&ao):
     _model = torch::jit::load(fname);
   }
   catch (const c10::Error& e) {
-    error("Cannot find Pytorch model.");    
+    error("Cannot load Pytorch model. Check that the model is present and that the version of Pytorch is compatible with the Libtorch linked to PLUMED.");    
   }
 
   checkRead();
