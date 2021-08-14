@@ -1,0 +1,3 @@
+USE=function
+#generic makefile
+include ../maketools/make.module
