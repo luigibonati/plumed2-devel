@@ -9,8 +9,8 @@
 # we require a recent version
 # notice that autoconf is not necessary on user's machine, but only
 # if one has to update configure.ac
-AC_PREREQ([2.68])
-AC_INIT([PLUMED], [2])
+AC_PREREQ([2.69])
+AC_INIT([PLUMED],[2])
 
 ##################################################################
 # In order to add m4 macros, put then in a m4 directory and include them here.
@@ -278,6 +278,7 @@ PLUMED_CONFIG_ENABLE([gsl],[search for gsl],[yes])
 PLUMED_CONFIG_ENABLE([xdrfile],[search for xdrfile],[yes])
 PLUMED_CONFIG_ENABLE([boost_graph],[search for boost graph],[no])
 PLUMED_CONFIG_ENABLE([boost_serialization],[search for boost serialization],[no])
+PLUMED_CONFIG_ENABLE([libtorch],[search for libtorch],[no]) #luigi
 PLUMED_CONFIG_ENABLE([fftw],[search for fftw],[yes])
 PLUMED_CONFIG_ENABLE([python],[search for python],[yes])
 PLUMED_CONFIG_ENABLE([af_ocl],[search for arrayfire_ocl],[no])
@@ -807,6 +808,17 @@ int main() {
 }
   ], [__PLUMED_HAS_BOOST_SERIALIZATION],[boost_serialization boost_serialization-mt])
 # notice: macports install libraries with -mt suffix
+fi
+
+if test $libtorch == true ; then #luigi
+  PLUMED_CHECK_CXX_PACKAGE([libtorch],[
+#include <torch/torch.h>
+#include <torch/script.h>
+int main() {
+  torch::Tensor tensor = torch::rand({2, 3});
+  return 0;
+}
+  ], [__PLUMED_HAS_LIBTORCH])
 fi
 
 if test $fftw == true ; then
