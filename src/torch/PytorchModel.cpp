@@ -19,6 +19,8 @@
    You should have received a copy of the GNU Lesser General Public License
    along with plumed.  If not, see <http://www.gnu.org/licenses/>.
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
+#ifdef __PLUMED_HAS_LIBTORCH
+
 #include "function/Function.h"
 #include "function/ActionRegister.h"
 
@@ -117,6 +119,9 @@ PytorchModel::PytorchModel(const ActionOptions&ao):
   //log.printf("Pytorch Model Loaded: %s \n",fname);
   log.printf("Number of input: %d \n",_n_in); 
   log.printf("Number of outputs: %d \n",_n_out); 
+  log.printf("  Bibliography: ");
+  log<<plumed.cite("Luigi Bonati, Valerio Rizzi, and Michele Parrinello, J. Phys. Chem. Lett. 11, 2998-3004 (2020)");
+  log.printf("\n");
 
 }
 
@@ -160,3 +165,5 @@ void PytorchModel::calculate() {
 }
 }
 }
+
+#endif
