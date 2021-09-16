@@ -278,7 +278,7 @@ PLUMED_CONFIG_ENABLE([gsl],[search for gsl],[yes])
 PLUMED_CONFIG_ENABLE([xdrfile],[search for xdrfile],[yes])
 PLUMED_CONFIG_ENABLE([boost_graph],[search for boost graph],[no])
 PLUMED_CONFIG_ENABLE([boost_serialization],[search for boost serialization],[no])
-PLUMED_CONFIG_ENABLE([libtorch],[search for libtorch],[no]) #luigi
+PLUMED_CONFIG_ENABLE([libtorch],[search for libtorch],[no]) #added by luigibonati
 PLUMED_CONFIG_ENABLE([fftw],[search for fftw],[yes])
 PLUMED_CONFIG_ENABLE([python],[search for python],[yes])
 PLUMED_CONFIG_ENABLE([af_ocl],[search for arrayfire_ocl],[no])
@@ -810,7 +810,8 @@ int main() {
 # notice: macports install libraries with -mt suffix
 fi
 
-if test $libtorch == true ; then #luigi
+#added by luigibonati
+if test $libtorch == true ; then 
   PLUMED_CHECK_CXX_PACKAGE([libtorch],[
 #include <torch/torch.h>
 #include <torch/script.h>
