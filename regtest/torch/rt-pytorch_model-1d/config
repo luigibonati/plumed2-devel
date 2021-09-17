@@ -1,0 +1,4 @@
+plumed_needs=libtorch
+plumed_modules=torch
+type=driver
+arg="--plumed plumed.dat --mf_xtc alanine.xtc"
