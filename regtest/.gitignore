@@ -29,6 +29,7 @@
 !/funnel
 !/opes
 !/tools
+!/sasa
 # Added by luigibonati
 !/torch
 # These files we just want to ignore completely

@@ -1,5 +1,5 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2012-2020 The plumed team
+   Copyright (c) 2012-2021 The plumed team
    (see the PEOPLE file at the root of the distribution for a list of names)
 
    See http://www.plumed.org for more information.
@@ -247,7 +247,7 @@ void GenericMolInfo::interpretSymbol( const std::string& symbol, std::vector<Ato
           atoms.push_back(AtomNumber::serial(n));
         }
         ok=1;
-      } catch (Exception & e) {
+      } catch (const Exception & e) {
         error_msg=e.what();
       }
       comm.Bcast(ok,0);

@@ -259,7 +259,7 @@ PLUMED_CONFIG_ENABLE([bsymbolic],[use -Bsymbolic flag in making shared libraries
 PLUMED_CONFIG_ENABLE([ld-r],[group object files],[yes])
 PLUMED_CONFIG_ENABLE([ar-cr],[use ar to build libplumedWrapper.a],[yes])
 PLUMED_CONFIG_ENABLE([static-archive],[try to build libplumed.a for static linking],[yes])
-PLUMED_CONFIG_ENABLE([asmjit],[enable embedded asmjit],[no])
+PLUMED_CONFIG_ENABLE([asmjit],[enable embedded asmjit],[yes])
 PLUMED_CONFIG_ENABLE([mpi],[search for mpi],[yes])
 PLUMED_CONFIG_ENABLE([external-lapack],[search for external lapack],[yes])
 PLUMED_CONFIG_ENABLE([external-blas],[search for external blas],[yes])
@@ -677,6 +677,28 @@ fi
 AC_OPENMP
 
 if test $asmjit == true ; then
+  AC_MSG_CHECKING([whether architecture is X86/X64])
+  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([
+#if !(defined(_M_IX86 ) || defined(__X86__ ) || defined(__i386  ) || \
+      defined(__IA32__) || defined(__I86__ ) || defined(__i386__) || \
+      defined(__i486__) || defined(__i586__) || defined(__i686__) || \
+      defined(_M_X64  ) || defined(__x86_64) || defined(__x86_64__) || \
+      defined(_M_AMD64) || defined(__amd64 ) || defined(__amd64__ ))
+this_is_not_x86_x64
+#endif
+  ])],
+  [AC_MSG_RESULT([yes])];
+  x86_x64=true,
+  [AC_MSG_RESULT([no]) ;
+  x86_x64=false])
+fi
+
+if test $asmjit == true && test $x86_x64 == false ; then
+  AC_MSG_WARN([asmjit does not support this architecture, it will be disabled])
+  asmjit=false
+fi
+
+if test $asmjit == true ; then
   found=ko
 # asmjit calls clock_gettime and thus should be linked to rt on Linux
   if test `(uname)` = Linux ; then
@@ -1015,13 +1037,6 @@ else
   make_pdfdoc=no
 fi
 
-### Look for xxd
-AC_CHECK_PROG([xxd],[xxd],[found])
-if test "$xxd" != found
-then
-  AC_MSG_ERROR([xxd should be installed for PLUMED to compile properly])
-fi
-
 AC_SUBST(program_can_run)
 program_can_run=""
 AC_MSG_CHECKING([whether a program can be run on this machine])
@@ -1124,7 +1139,7 @@ for test_LD_RO in "$($CXX --print-prog-name=ld) -r -o" "$CXX -Wl,-r -o" "ld -r -
 do
   AC_MSG_CHECKING([whether C++ objects can be grouped with $test_LD_RO])
   
-  rm -f conftest-*
+  rm -f conftest*
   
   cat << EOF > conftest-main.cpp
   void f(void);
@@ -1165,7 +1180,7 @@ for test_AR_CR in "$($CXX --print-prog-name=ar) cr" "ar cr"
 do
   AC_MSG_CHECKING([whether static libraries can be created with $test_AR_CR])
   
-  rm -f conftest-*
+  rm -f conftest*
   
   cat << EOF > conftest-main.cpp
   void f(void);

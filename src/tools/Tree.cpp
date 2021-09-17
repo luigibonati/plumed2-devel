@@ -1,5 +1,5 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2011-2020 The plumed team
+   Copyright (c) 2021 The plumed team
    (see the PEOPLE file at the root of the distribution for a list of names)
 
    See http://www.plumed.org for more information.
@@ -81,6 +81,7 @@ std::vector<AtomNumber> Tree::getTree(std::vector<AtomNumber> atoms)
         selected_vertex = j;
     }
     // add to tree
+    plumed_assert(selected_vertex>=0);
     tree.push_back(atoms[selected_vertex]);
     intree[selected_vertex] = true;
     // update distances

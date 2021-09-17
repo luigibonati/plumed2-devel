@@ -1,5 +1,5 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2011-2020 The plumed team
+   Copyright (c) 2021 The plumed team
    (see the PEOPLE file at the root of the distribution for a list of names)
 
    See http://www.plumed.org for more information.
@@ -40,7 +40,7 @@ private:
 
 public:
 /// constructor
-  Tree(GenericMolInfo* moldat);
+  explicit Tree(GenericMolInfo* moldat);
 /// build a tree
   std::vector<AtomNumber> getTree(std::vector<AtomNumber> atoms);
 /// get root
