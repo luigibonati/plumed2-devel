@@ -41,7 +41,6 @@
 !/secondarystructure
 !/setup
 !/tools
-!/torch
 !/vatom
 !/ves
 !/vesselbase
@@ -52,6 +51,7 @@
 !/funnel
 !/fisst
 !/sasa
+!/mlcvs
 
 # And just ignore these files
 *.xxd

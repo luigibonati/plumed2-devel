@@ -1,4 +1,4 @@
 plumed_needs=libtorch
-plumed_modules=torch
+plumed_modules=mlcvs
 type=driver
 arg="--plumed plumed.dat --mf_xtc alanine.xtc"

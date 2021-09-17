@@ -3234,7 +3234,7 @@ else
 
 fi
 
- #luigi
+ #added by luigibonati
 
 fftw=
 # Check whether --enable-fftw was given.
@@ -8904,7 +8904,8 @@ $as_echo "$as_me: WARNING: cannot enable __PLUMED_HAS_BOOST_SERIALIZATION" >&2;}
 # notice: macports install libraries with -mt suffix
 fi
 
-if test $libtorch == true ; then #luigi
+#added by luigibonati
+if test $libtorch == true ; then
 
     found=ko
     __PLUMED_HAS_LIBTORCH=no
