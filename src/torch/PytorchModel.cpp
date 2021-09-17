@@ -21,6 +21,7 @@
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 #ifdef __PLUMED_HAS_LIBTORCH
 
+#include "core/PlumedMain.h"
 #include "function/Function.h"
 #include "function/ActionRegister.h"
 
