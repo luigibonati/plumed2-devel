@@ -2,9 +2,10 @@
 
 #define input x
 phi: TORSION ATOMS=5,7,9,15
+psi: TORSION ATOMS=7,9,15,17
 
 #load model computing [sin(x),cos(x)]
-model: PYTORCH_MODEL MODEL=torch_model.pt ARG=phi
+model: PYTORCH_MODEL_TEST FILE=torch_model.pt ARG=phi,psi
 
 #output derivatives dy/dx
 DUMPDERIVATIVES ARG=model.* STRIDE=5 FILE=DERIVATIVES

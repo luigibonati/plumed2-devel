@@ -11,9 +11,10 @@ def my_torch_cv(x):
         y (torch.tensor): collective variable (scalar)
     '''
     # CV definition
-    y1 = torch.sin(x)
-    y2 = torch.cos(x)
-    y = torch.cat((y1,y2))
+    #y1 = torch.sin(x)
+    #y2 = torch.cos(x)
+    #y = torch.cat((y1,y2))
+    y = torch.sin(x)
     return y
 
 input_size = 1
