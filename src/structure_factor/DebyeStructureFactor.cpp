@@ -1,23 +1,13 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2016,2017 The plumed team
-   (see the PEOPLE file at the root of the distribution for a list of names)
+  Development version of the Structure Factor collective variable, 
+  in its Debye approximation.
+  See also https://www.plumed-nest.org/eggs/19/000/data/sodium/plumed-metad.dat.html
 
-   See http://www.plumed.org for more information.
+  Author: Michele Invernizzi - https://github.com/invemichele
 
-   This file is part of plumed, version 2.
-
-   plumed is free software: you can redistribute it and/or modify
-   it under the terms of the GNU Lesser General Public License as published by
-   the Free Software Foundation, either version 3 of the License, or
-   (at your option) any later version.
-
-   plumed is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU Lesser General Public License for more details.
-
-   You should have received a copy of the GNU Lesser General Public License
-   along with plumed.  If not, see <http://www.gnu.org/licenses/>.
+  Please read and cite: 
+    "Molecular dynamics simulations of liquid silica crystallization"
+    Niu, Piaggi, Invernizzi, Parrinello - PNAS (2018)
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 #include "colvar/Colvar.h"
 #include "colvar/ActionRegister.h"

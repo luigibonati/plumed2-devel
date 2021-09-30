@@ -1,6 +1,7 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
   Development version of the Structure Factor collective variable, averaged
   over all the scattering vectors with same modulus (k-shell).
+
   Author: Michele Invernizzi - https://github.com/invemichele
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 #include "colvar/Colvar.h"

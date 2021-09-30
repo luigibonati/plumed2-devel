@@ -1,7 +1,12 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
   Development version of the Structure Factor collective variable.
   This is a work in pogress, be carefull: edges are rough.
+
   Author: Michele Invernizzi - https://github.com/invemichele
+
+  Please read and cite: 
+    "Collective variables for the study of crystallisation"
+    Karmakar, Invernizzi, Rizzi, Parrinello - Mol. Phys. (2021)
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 #include "colvar/Colvar.h"
 #include "colvar/ActionRegister.h"
