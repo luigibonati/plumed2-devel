@@ -455,10 +455,10 @@ void DebyeStructureFactor::calculate()
         d_window=(window_arg*cos(window_arg)-sin(window_arg))/window_arg/R_ij;
       }
       //trigonometric tricks
-      double base_cos; //this throws a warning, but is correct (and faster)
-      double base_sin;
-      double prev_cos;
-      double prev_sin;
+      double base_cos=0; //only used if grid_mode_
+      double base_sin=0;
+      double prev_cos=0;
+      double prev_sin=0;
       if (grid_mode_)
       {
         base_cos=cos(q_const_*R_ij);
