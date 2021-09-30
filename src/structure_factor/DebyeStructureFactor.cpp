@@ -27,7 +27,9 @@
 #include <cmath>
 #include <sstream> //std::ostringstream
 #include <string.h> //strcasecmp
-#include "Compton_consts.h" //source: http://lammps.sandia.gov/doc/compute_xrd.html
+#if __has_include("Compton_consts.h")
+#  include "Compton_consts.h" //source: http://lammps.sandia.gov/doc/compute_xrd.html
+#endif
 
 using namespace std;
 
@@ -365,6 +367,7 @@ DebyeStructureFactor::DebyeStructureFactor(const ActionOptions&ao):
   }
   else
   {
+#if __has_include("Compton_consts.h")
     plumed_massert(atom_type.size()==NumTypes,"for each atom type specify both ATOM_TYPE and ATOMSn");
     log.printf("    considering Compton scattering factor (x-ray only):\n");
     std::vector< std::vector<double> > compton_scat(NumTypes);
@@ -394,6 +397,9 @@ DebyeStructureFactor::DebyeStructureFactor(const ActionOptions&ao):
       for (unsigned n=m; n<NumTypes; n++)
         for (unsigned q=0; q<active_q_.size(); q++)
           form_factor[group_index(m,n)][q]*=compton_scat[m][q]*compton_scat[n][q];
+#else
+    plumed_merror("compile with the file <Compton_consts.h> for this feature");
+#endif
   }
 
   //for the structure factor the shift is 1, here must be properly scaled
