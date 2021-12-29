@@ -1,24 +1,14 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   Copyright (c) 2011-2018 The plumed team
-   (see the PEOPLE file at the root of the distribution for a list of names)
+   PLUMED2 - Pytorch interface.
 
-   See http://www.plumed.org for more information.
+   Author: Luigi Bonati - https://github.com/luigibonati
 
-   This file is part of plumed, version 2.
+   Please read and cite: 
+     "Data-Driven Collective Variables for Enhanced Sampling"
+     Bonati, Rizzi and Parrinello - JPCL (2020)
 
-   plumed is free software: you can redistribute it and/or modify
-   it under the terms of the GNU Lesser General Public License as published by
-   the Free Software Foundation, either version 3 of the License, or
-   (at your option) any later version.
+ +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 
-   plumed is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU Lesser General Public License for more details.
-
-   You should have received a copy of the GNU Lesser General Public License
-   along with plumed.  If not, see <http://www.gnu.org/licenses/>.
-+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 #ifdef __PLUMED_HAS_LIBTORCH
 
 #include "core/PlumedMain.h"
