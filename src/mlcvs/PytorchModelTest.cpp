@@ -11,7 +11,7 @@
 
 /* Use the following preprocessor directive only if plumed 
 is configured to look for libtorch */
-//#ifdef __PLUMED_HAS_LIBTORCH
+#ifdef __PLUMED_HAS_LIBTORCH
 
 #include "core/PlumedMain.h"
 #include "function/Function.h"
@@ -169,4 +169,4 @@ void PytorchModelTest::calculate() {
 }
 }
 
-//#endif
+#endif
