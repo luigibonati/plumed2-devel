@@ -77,7 +77,7 @@ jobs:
         python -c "import mdtraj" ;
         # added by luigibonati
         pip install --user torch==1.8.2+cpu -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html ;
-        pyton -c "import torch";
+        python -c "import torch";
     - name: Download and configure Libtorch
       run: |
         # added by luigibonati
