@@ -75,6 +75,18 @@ jobs:
         pip install --user MDAnalysis ;
         python -c "import MDAnalysis" ;
         python -c "import mdtraj" ;
+      # addition by luigibonati
+        pip install --user torch==1.8.2+cpu -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html
+        pyton -c "import torch";
+    - name: Download and configure Libtorch
+      run: |
+        wget https://download.pytorch.org/libtorch/lts/1.8/cpu/libtorch-cxx11-abi-shared-with-deps-1.8.2%2Bcpu.zip
+        unzip libtorch-cxx11-abi-shared-with-deps-1.8.2+cpu.zip
+        echo "LIBTORCH=${PWD}/libtorch/" >> $GITHUB_ENV
+        echo "PLUMED_CONFIG=$PLUMED_CONFIG --enable-cxx=14 --enable-libtorch --disable-external-lapack --disable-external-blas" >> $GITHUB_ENV
+        echo "PLUMED_CONFIG=$PLUMED_CONFIG CPPFLAGS=\"-I${LIBTORCH}/include/torch/csrc/api/include/ -I${LIBTORCH}/include/ -I${LIBTORCH}/include/torch\"" >> $GITHUB_ENV
+        echo "PLUMED_CONFIG=$PLUMED_CONFIG LDFLAGS=\"-L${LIBTORCH}/lib -Wl,-rpath,$LD_LIBRARY_PATH\" LIBS=\"-ltorch -lc10 -ltorch_cpu\"" >> $GITHUB_ENV
+      # end addition
     - name: Install Doxygen
       if: contains( matrix.variant, '-doc-' )
       run: |
