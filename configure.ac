@@ -234,7 +234,7 @@ PLUMED_CONFIG_ENABLE([gcov],[gcov to estimate code coverage],[no])
 AC_ARG_ENABLE([cxx],
   AS_HELP_STRING([--enable-cxx], [11 or 14. To link libraries with headers that need this C++ level. Use --enable-cxx=none to remove -std=c++ flag]),
   [
-    case "${enableval}" in
+    case "$}" in
     (11) cxx_level=11 ;;
     (14) cxx_level=14 ;;
     (none) cxx_level="" ;;
@@ -278,12 +278,12 @@ PLUMED_CONFIG_ENABLE([gsl],[search for gsl],[yes])
 PLUMED_CONFIG_ENABLE([xdrfile],[search for xdrfile],[yes])
 PLUMED_CONFIG_ENABLE([boost_graph],[search for boost graph],[no])
 PLUMED_CONFIG_ENABLE([boost_serialization],[search for boost serialization],[no])
-PLUMED_CONFIG_ENABLE([libtorch],[search for libtorch],[no]) #added by luigibonati
 PLUMED_CONFIG_ENABLE([fftw],[search for fftw],[yes])
 PLUMED_CONFIG_ENABLE([python],[search for python],[yes])
 PLUMED_CONFIG_ENABLE([af_ocl],[search for arrayfire_ocl],[no])
 PLUMED_CONFIG_ENABLE([af_cuda],[search for arrayfire_cuda],[no])
 PLUMED_CONFIG_ENABLE([af_cpu],[search for arrayfire_cpu],[no])
+PLUMED_CONFIG_ENABLE([libtorch],[search for libtorch],[no]) #added by luigibonati
 
 AC_ARG_VAR(SOEXT,[extension of dynamic libraries (so/dylib)])
 AC_ARG_VAR(STATIC_LIBS,[variables that should be linked statically directly to MD code - configure will add here -ldl if necessary ])
@@ -832,18 +832,6 @@ int main() {
 # notice: macports install libraries with -mt suffix
 fi
 
-#added by luigibonati
-if test $libtorch == true ; then 
-  PLUMED_CHECK_CXX_PACKAGE([libtorch],[
-#include <torch/torch.h>
-#include <torch/script.h>
-int main() {
-  torch::Tensor tensor = torch::rand({2, 3});
-  return 0;
-}
-  ], [__PLUMED_HAS_LIBTORCH])
-fi
-
 if test $fftw == true ; then
   PLUMED_CHECK_PACKAGE([fftw3.h],[fftw_execute],[__PLUMED_HAS_FFTW],[fftw3])
 fi
@@ -891,6 +879,18 @@ if test "$af_cuda" == true ; then
 fi
 if test "$af_cpu" == true ; then
   PLUMED_CHECK_PACKAGE([arrayfire.h],[af_is_double],[__PLUMED_HAS_ARRAYFIRE],[afcpu])
+fi
+
+#added by luigibonati
+if test $libtorch == true ; then 
+  PLUMED_CHECK_CXX_PACKAGE([libtorch],[
+#include <torch/torch.h>
+#include <torch/script.h>
+int main() {
+  torch::Tensor tensor = torch::rand({2, 3});
+  return 0;
+}
+  ], [__PLUMED_HAS_LIBTORCH])
 fi
 
 # in non-debug mode, add -DNDEBUG

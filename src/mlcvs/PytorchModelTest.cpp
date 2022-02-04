@@ -5,11 +5,13 @@
 
    Please read and cite: 
      "Data-Driven Collective Variables for Enhanced Sampling"
-     Bonati, Rizzi and Parrinello - JPCL (2020)
+     L. Bonati, V. Rizzi and M. Parrinello - JPCL (2020)
 
  +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 
-#ifdef __PLUMED_HAS_LIBTORCH
+/* Use the following preprocessor directive only if plumed 
+is configured to look for libtorch */
+//#ifdef __PLUMED_HAS_LIBTORCH
 
 #include "core/PlumedMain.h"
 #include "function/Function.h"
@@ -48,6 +50,7 @@ class PytorchModelTest :
   unsigned _n_in;
   unsigned _n_out;
   torch::jit::script::Module _model;
+
 public:
   explicit PytorchModelTest(const ActionOptions&);
   void calculate();
@@ -79,7 +82,7 @@ PytorchModelTest::PytorchModelTest(const ActionOptions&ao):
   _n_in=getNumberOfArguments();
 
   //parse model name
-  std::string fname="model.pt";
+  std::string fname="model.ptc";
   parse("FILE",fname); 
  
   //deserialize the model from file
@@ -114,7 +117,7 @@ PytorchModelTest::PytorchModelTest(const ActionOptions&ao):
   log.printf("Number of input: %d \n",_n_in); 
   log.printf("Number of outputs: %d \n",_n_out); 
   log.printf("  Bibliography: ");
-  log<<plumed.cite("Luigi Bonati, Valerio Rizzi, and Michele Parrinello, J. Phys. Chem. Lett. 11, 2998-3004 (2020)");
+  log<<plumed.cite("L. Bonati, V. Rizzi and M. Parrinello, J. Phys. Chem. Lett. 11, 2998-3004 (2020)");
   log.printf("\n");
 
 }
@@ -161,10 +164,9 @@ void PytorchModelTest::calculate() {
       setDerivative( getPntrToComponent(name_comp) ,i, der[i] );
     //reset gradients
     //input_S.grad().zero_();
- 
   }
 }
 }
 }
 
-#endif
+//#endif

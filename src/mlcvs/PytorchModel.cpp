@@ -90,7 +90,8 @@ PytorchModel::PytorchModel(const ActionOptions&ao):
 
   //check the dimension of the output
   log.printf("Checking output dimension:\n");
-
+  std::vector<float> input_test (_n_in);
+  torch::Tensor single_input = torch::tensor(input_test).view({1,_n_in});  
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back( single_input );
   torch::Tensor output = _model.forward( inputs ).toTensor(); 
