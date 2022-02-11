@@ -1,13 +1,19 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-   PLUMED2 - Pytorch interface.
+Copyright (c) 2021 of Luigi Bonati.
 
-   Author: Luigi Bonati - https://github.com/luigibonati
+The torch module is free software: you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-   Please read and cite: 
-     "Data-Driven Collective Variables for Enhanced Sampling"
-     L. Bonati, V. Rizzi and M. Parrinello - JPCL (2020)
+The opes module is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
 
- +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
+You should have received a copy of the GNU Lesser General Public License
+along with plumed.  If not, see <http://www.gnu.org/licenses/>.
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 
 /* Use the following preprocessor directive only if plumed 
 is configured to look for libtorch */
