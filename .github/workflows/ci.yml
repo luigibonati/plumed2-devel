@@ -71,10 +71,10 @@ jobs:
         pip install --user nose
         pip install --user six ;
         pip install --user pandas ;
-        #pip install --user mdtraj ;
-        #pip install --user MDAnalysis ;
-        #python -c "import MDAnalysis" ;
-        #python -c "import mdtraj" ;
+        pip install --user mdtraj ;
+        pip install --user MDAnalysis ;
+        python -c "import MDAnalysis" ;
+        python -c "import mdtraj" ;
         # added by luigibonati
         pip install --user torch==1.8.2+cpu -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html ;
         python -c "import torch";
@@ -83,8 +83,6 @@ jobs:
         # added by luigibonati
         wget https://download.pytorch.org/libtorch/lts/1.8/cpu/libtorch-cxx11-abi-shared-with-deps-1.8.2%2Bcpu.zip ;
         unzip libtorch-cxx11-abi-shared-with-deps-1.8.2+cpu.zip ;
-        # note: envs are available only from the next step on
-        #echo "LIBTORCH=${PWD}/libtorch" >> $GITHUB_ENV
         echo "LIBRARY_PATH=${PWD}/libtorch/lib:$LIBRARY_PATH" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=${PWD}/libtorch/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
         echo "CPATH=$CPATH:{PWD}/libtorch/include/torch/csrc/api/include/:{PWD}/libtorch/include/:{PWD}/libtorch/include/torch"
@@ -93,8 +91,6 @@ jobs:
         echo "LIBS=$LIBS -ltorch -lc10 -ltorch_cpu" >> $GITHUB_ENV
         echo "PLUMED_CONFIG=$PLUMED_CONFIG --enable-cxx=14 --enable-libtorch --disable-external-lapack --disable-external-blas" >> $GITHUB_ENV
         #echo "PLUMED_CONFIG=$PLUMED_CONFIG --enable-cxx=14 --enable-rpath --enable-libtorch --disable-external-lapack --disable-external-blas CPPFLAGS=\"-I${PWD}/libtorch/include/torch/csrc/api/include/ -I${PWD}/libtorch/include/ -I${PWD}/libtorch/include/torch\" LDFLAGS=\"-L${PWD}/libtorch/lib -Wl,-rpath,$LD_LIBRARY_PATH\" LIBS=\"-ltorch -lc10 -ltorch_cpu\"" >> $GITHUB_ENV
-    - name: Display env
-      run: env
     - name: Install Doxygen
       if: contains( matrix.variant, '-doc-' )
       run: |
@@ -144,7 +140,7 @@ jobs:
       run: |
         env
         ccache -s -M 100M
-        ./configure CXX="ccache $CXX" --enable-boost_serialization --disable-dependency-tracking --enable-modules=all LDFLAGS=-Wl,-rpath,$LD_LIBRARY_PATH $PLUMED_CONFIG --prefix="$HOME/opt" || cat config.log #luigibonati
+        ./configure CXX="ccache $CXX" --enable-boost_serialization --disable-dependency-tracking --enable-modules=all LDFLAGS=-Wl,-rpath,$LD_LIBRARY_PATH $PLUMED_CONFIG --prefix="$HOME/opt" && cat config.log || cat config.log #luigibonati
         make -j 4
         make install 
         # check for global symbols, see https://github.com/plumed/plumed2/issues/549
