@@ -17,13 +17,13 @@ def my_torch_cv(x):
     y = torch.sin(x)
     return y
 
-input_size = 1
+input_size = 2
 
 # -- DEFINE INPUT -- 
 #random 
 #x = torch.rand(input_size, dtype=torch.float32, requires_grad=True).unsqueeze(0)
 #or by choosing the value(s) of the array
-x = torch.tensor([0.], dtype=torch.float32, requires_grad=True)
+x = torch.tensor([0.,1.57], dtype=torch.float32, requires_grad=True)
 
 # -- CALCULATE CV -- 
 y = my_torch_cv(x)

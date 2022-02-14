@@ -76,9 +76,9 @@ jobs:
         #python -c "import MDAnalysis" ;
         #python -c "import mdtraj" ;
         # added by luigibonati
-        #pip install --user torch==1.8.2+cpu -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html ;
-        #python -c "import torch";
-    - name: Download and configure Libtorch
+        pip install --user torch==1.8.2+cpu -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html ;
+        python -c "import torch";
+    - name: Download Libtorch
       run: |
         # added by luigibonati
         wget https://download.pytorch.org/libtorch/lts/1.8/cpu/libtorch-cxx11-abi-shared-with-deps-1.8.2%2Bcpu.zip ;
@@ -86,7 +86,7 @@ jobs:
         echo "LIBRARY_PATH=$PWD/libtorch/lib:$LIBRARY_PATH" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=$PWD/libtorch/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
         echo "CPATH=$PWD/libtorch/include/torch/csrc/api/include/:$PWD/libtorch/include/:$PWD/libtorch/include/torch:$CPATH" >> $GITHUB_ENV
-        #echo "INCLUDE=$PWD/libtorch/include/torch/csrc/api/include/:$PWD/libtorch/include/:$PWD/libtorch/include/torch:$INCLUDE" >> $GITHUB_ENV
+        echo "INCLUDE=$PWD/libtorch/include/torch/csrc/api/include/:$PWD/libtorch/include/:$PWD/libtorch/include/torch:$INCLUDE" >> $GITHUB_ENV
         ###echo "CPPFLAGS=-I$PWD/libtorch/include/torch/csrc/api/include/ -I$PWD/libtorch/include/ -I$PWD/libtorch/include/torch" >> $GITHUB_ENV
         ###echo "LDFLAGS=-L$PWD/libtorch/lib" >> $GITHUB_ENV 
         echo "LIBS=$LIBS -ltorch -lc10 -ltorch_cpu" >> $GITHUB_ENV
