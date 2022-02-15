@@ -1,0 +1,8 @@
+
+wget https://download.pytorch.org/libtorch/lts/1.8/cpu/libtorch-cxx11-abi-shared-with-deps-1.8.2%2Bcpu.zip ;
+unzip libtorch-cxx11-abi-shared-with-deps-1.8.2+cpu.zip ;
+
+export LIBRARY_PATH=$PWD/libtorch/lib:$LIBRARY_PATH
+export LD_LIBRARY_PATH=$PWD/libtorch/lib:$LD_LIBRARY_PATH
+CPATH=$PWD/libtorch/include/torch/csrc/api/include/:$PWD/libtorch/include/:$PWD/libtorch/include/torch:$CPATH
+INCLUDE=$PWD/libtorch/include/torch/csrc/api/include/:$PWD/libtorch/include/:$PWD/libtorch/include/torch:$INCLUDE
