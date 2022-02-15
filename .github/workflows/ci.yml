@@ -91,6 +91,9 @@ jobs:
         ./.travis/install.libtorch
         echo "LIBS=$LIBS -ltorch -lc10 -ltorch_cpu" >> $GITHUB_ENV
         echo "PLUMED_CONFIG=$PLUMED_CONFIG --enable-cxx=14 --enable-libtorch --disable-external-lapack --disable-external-blas" >> $GITHUB_ENV
+        #TODO REMOVE 
+    - name: Display env
+      run: env
     - name: Install Doxygen
       if: contains( matrix.variant, '-doc-' )
       run: |
