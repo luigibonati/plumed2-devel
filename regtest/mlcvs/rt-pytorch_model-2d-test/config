@@ -1,8 +1,0 @@
-plumed_needs=libtorch
-plumed_modules=mlcvs
-type=driver
-arg="--plumed plumed.dat --mf_xtc alanine.xtc"
-
-function plumed_regtest_before(){
-  python create-pytorch-model.py
-}
