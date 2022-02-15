@@ -1,4 +1,4 @@
-plumed_needs=libtorch
+plumed_needs=python libtorch
 plumed_modules=mlcvs
 type=python
 arg="./create-pytorch-model.py"
