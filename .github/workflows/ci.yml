@@ -79,6 +79,7 @@ jobs:
         pip install --user torch==1.8.2+cpu -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html ;
         python -c "import torch";
     - name: Download Libtorch
+      if: ${{ ! contains( matrix.variant, '-debug-' ) }} 
       run: |
         # added by luigibonati
         wget https://download.pytorch.org/libtorch/lts/1.8/cpu/libtorch-cxx11-abi-shared-with-deps-1.8.2%2Bcpu.zip ;
@@ -141,7 +142,7 @@ jobs:
       run: |
         env
         ccache -s -M 100M
-        ./configure CXX="ccache $CXX" --enable-boost_serialization --disable-dependency-tracking --enable-modules=all LDFLAGS=-Wl,-rpath,$LD_LIBRARY_PATH $PLUMED_CONFIG --prefix="$HOME/opt" && cat config.log || cat config.log #luigibonati
+        ./configure CXX="ccache $CXX" --enable-boost_serialization --disable-dependency-tracking --enable-modules=all LDFLAGS=-Wl,-rpath,$LD_LIBRARY_PATH $PLUMED_CONFIG --prefix="$HOME/opt"
         make -j 4
         make install 
         # check for global symbols, see https://github.com/plumed/plumed2/issues/549
