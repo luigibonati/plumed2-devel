@@ -7,7 +7,7 @@ phi: TORSION ATOMS=5,7,9,15
 model: PYTORCH_MODEL_TEST FILE=torch_model.pt ARG=phi
 
 #output derivatives dy/dx
-DUMPDERIVATIVES ARG=model.* STRIDE=5 FILE=DERIVATIVES
+DUMPDERIVATIVES ARG=model.* STRIDE=5 FILE=DERIVATIVES FMT=%10.6f
 
 #print colvar
 PRINT FMT=%g STRIDE=5 FILE=COLVAR ARG=phi,model.*
