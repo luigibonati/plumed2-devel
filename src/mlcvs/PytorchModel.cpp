@@ -28,7 +28,7 @@ along with plumed.  If not, see <http://www.gnu.org/licenses/>.
 using namespace std;
 
 std::vector<float> tensor_to_vector(const torch::Tensor& x) {
-    return std::vector<float>(x.data_ptr<float>(), x.data_ptr<float>() + x.numel());
+  return std::vector<float>(x.data_ptr<float>(), x.data_ptr<float>() + x.numel());
 }
 
 namespace PLMD {
@@ -40,7 +40,7 @@ namespace mlcvs {
 Load a model trained with Pytorch. The derivatives are set using native backpropagation in Pytorch.
 
 \par Examples
-Define a model that takes as inputs two distances d1 and d2 
+Define a model that takes as inputs two distances d1 and d2
 
 \plumedfile
 model: PYTORCH_MODEL MODEL=model.pt ARG=d1,d2
@@ -70,8 +70,8 @@ PLUMED_REGISTER_ACTION(PytorchModel,"PYTORCH_MODEL")
 void PytorchModel::registerKeywords(Keywords& keys) {
   Function::registerKeywords(keys);
   keys.use("ARG");
-  keys.add("optional","MODEL","filename of the trained model"); 
-  keys.addOutputComponent("node", "default", "NN outputs"); 
+  keys.add("optional","MODEL","filename of the trained model");
+  keys.addOutputComponent("node", "default", "NN outputs");
 }
 
 PytorchModel::PytorchModel(const ActionOptions&ao):
@@ -83,14 +83,14 @@ PytorchModel::PytorchModel(const ActionOptions&ao):
 
   //parse model name
   std::string fname="model.pt";
-  parse("MODEL",fname); 
- 
+  parse("MODEL",fname);
+
   //deserialize the model from file
   try {
     _model = torch::jit::load(fname);
   }
   catch (const c10::Error& e) {
-    error("Cannot load Pytorch model. Check that the model is present and that the version of Pytorch is compatible with the Libtorch linked to PLUMED.");    
+    error("Cannot load Pytorch model. Check that the model is present and that the version of Pytorch is compatible with the Libtorch linked to PLUMED.");
   }
 
   checkRead();
@@ -98,24 +98,24 @@ PytorchModel::PytorchModel(const ActionOptions&ao):
   //check the dimension of the output
   log.printf("Checking output dimension:\n");
   std::vector<float> input_test (_n_in);
-  torch::Tensor single_input = torch::tensor(input_test).view({1,_n_in});  
+  torch::Tensor single_input = torch::tensor(input_test).view({1,_n_in});
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back( single_input );
-  torch::Tensor output = _model.forward( inputs ).toTensor(); 
+  torch::Tensor output = _model.forward( inputs ).toTensor();
   vector<float> cvs = tensor_to_vector (output);
   _n_out=cvs.size();
 
   //create components
-  for(unsigned j=0; j<_n_out; j++){
+  for(unsigned j=0; j<_n_out; j++) {
     string name_comp = "node-"+std::to_string(j);
     addComponentWithDerivatives( name_comp );
     componentIsNotPeriodic( name_comp );
   }
- 
+
   //print log
   //log.printf("Pytorch Model Loaded: %s \n",fname);
-  log.printf("Number of input: %d \n",_n_in); 
-  log.printf("Number of outputs: %d \n",_n_out); 
+  log.printf("Number of input: %d \n",_n_in);
+  log.printf("Number of outputs: %d \n",_n_out);
   log.printf("  Bibliography: ");
   log<<plumed.cite("Luigi Bonati, Valerio Rizzi, and Michele Parrinello, J. Phys. Chem. Lett. 11, 2998-3004 (2020)");
   log.printf("\n");
@@ -135,28 +135,28 @@ void PytorchModel::calculate() {
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back( input_S );
   //calculate output
-  torch::Tensor output = _model.forward( inputs ).toTensor();  
+  torch::Tensor output = _model.forward( inputs ).toTensor();
   //set CV values
   vector<float> cvs = tensor_to_vector (output);
-  for(unsigned j=0; j<_n_out; j++){
+  for(unsigned j=0; j<_n_out; j++) {
     string name_comp = "node-"+std::to_string(j);
     getPntrToComponent(name_comp)->set(cvs[j]);
   }
   //derivatives
-  for(unsigned j=0; j<_n_out; j++){
-   //backpropagation
+  for(unsigned j=0; j<_n_out; j++) {
+    //backpropagation
     output[0][j].backward();
     //convert to vector
     vector<float> der = tensor_to_vector (input_S.grad() );
     string name_comp = "node-"+std::to_string(j);
     //set derivatives of component j
     for(unsigned i=0; i<_n_in; i++)
-      setDerivative( getPntrToComponent(name_comp) ,i,der[i]);
+      setDerivative( getPntrToComponent(name_comp),i,der[i]);
     //reset gradients
     input_S.grad().zero_();
     //for(unsigned i=0; i<_n_in; i++)
     //	input_S.grad()[0][i] = 0.;
- 
+
   }
 
 }

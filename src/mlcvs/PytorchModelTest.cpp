@@ -15,7 +15,7 @@ You should have received a copy of the GNU Lesser General Public License
 along with plumed.  If not, see <http://www.gnu.org/licenses/>.
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 
-/* Use the following preprocessor directive only if plumed 
+/* Use the following preprocessor directive only if plumed
 is configured to look for libtorch */
 #ifdef __PLUMED_HAS_LIBTORCH
 
@@ -71,13 +71,13 @@ PLUMED_REGISTER_ACTION(PytorchModelTest,"PYTORCH_MODEL_TEST")
 void PytorchModelTest::registerKeywords(Keywords& keys) {
   Function::registerKeywords(keys);
   keys.use("ARG");
-  keys.add("optional","FILE","filename of the trained model"); 
-  keys.addOutputComponent("node", "default", "NN outputs"); 
+  keys.add("optional","FILE","filename of the trained model");
+  keys.addOutputComponent("node", "default", "NN outputs");
 }
 
 // Auxiliary function to transform torch tensor in std vector
 std::vector<float> PytorchModelTest::tensor_to_vector(const torch::Tensor& x) {
-    return std::vector<float>(x.data_ptr<float>(), x.data_ptr<float>() + x.numel());
+  return std::vector<float>(x.data_ptr<float>(), x.data_ptr<float>() + x.numel());
 }
 
 PytorchModelTest::PytorchModelTest(const ActionOptions&ao):
@@ -90,14 +90,14 @@ PytorchModelTest::PytorchModelTest(const ActionOptions&ao):
 
   //parse model name
   std::string fname="model.ptc";
-  parse("FILE",fname); 
- 
+  parse("FILE",fname);
+
   //deserialize the model from file
   try {
     _model = torch::jit::load(fname);
   }
   catch (const c10::Error& e) {
-    error("Cannot load Pytorch model. Check that the model is present and that the version of Pytorch is compatible with the Libtorch linked to PLUMED.");    
+    error("Cannot load Pytorch model. Check that the model is present and that the version of Pytorch is compatible with the Libtorch linked to PLUMED.");
   }
 
   checkRead();
@@ -105,24 +105,24 @@ PytorchModelTest::PytorchModelTest(const ActionOptions&ao):
   //check the dimension of the output
   log.printf("Checking output dimension:\n");
   std::vector<float> input_test (_n_in);
-  torch::Tensor single_input = torch::tensor(input_test).view({1,_n_in});  
+  torch::Tensor single_input = torch::tensor(input_test).view({1,_n_in});
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back( single_input );
-  torch::Tensor output = _model.forward( inputs ).toTensor(); 
+  torch::Tensor output = _model.forward( inputs ).toTensor();
   vector<float> cvs = this->tensor_to_vector (output);
   _n_out=cvs.size();
 
   //create components
-  for(unsigned j=0; j<_n_out; j++){
+  for(unsigned j=0; j<_n_out; j++) {
     string name_comp = "node-"+std::to_string(j);
     addComponentWithDerivatives( name_comp );
     componentIsNotPeriodic( name_comp );
   }
- 
+
   //print log
   //log.printf("Pytorch Model Loaded: %s \n",fname);
-  log.printf("Number of input: %d \n",_n_in); 
-  log.printf("Number of outputs: %d \n",_n_out); 
+  log.printf("Number of input: %d \n",_n_in);
+  log.printf("Number of outputs: %d \n",_n_out);
   log.printf("  Bibliography: ");
   log<<plumed.cite("L. Bonati, V. Rizzi and M. Parrinello, J. Phys. Chem. Lett. 11, 2998-3004 (2020)");
   log.printf("\n");
@@ -142,24 +142,24 @@ void PytorchModelTest::calculate() {
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back( input_S );
   //calculate output
-  torch::Tensor output = _model.forward( inputs ).toTensor();  
+  torch::Tensor output = _model.forward( inputs ).toTensor();
   //set CV values
   vector<float> cvs = this->tensor_to_vector (output);
-  for(unsigned j=0; j<_n_out; j++){
+  for(unsigned j=0; j<_n_out; j++) {
     string name_comp = "node-"+std::to_string(j);
     getPntrToComponent(name_comp)->set(cvs[j]);
   }
   //derivatives
-  for(unsigned j=0; j<_n_out; j++){
+  for(unsigned j=0; j<_n_out; j++) {
     // expand dim to have shape (1,_n_out)
-    int batch_size = 1; 
-    auto grad_output = torch::ones({1}).expand({batch_size, 1}); 
+    int batch_size = 1;
+    auto grad_output = torch::ones({1}).expand({batch_size, 1});
     // calculate derivatives with automatic differentiation
     auto gradient = torch::autograd::grad({output.slice(/*dim=*/1, /*start=*/j, /*end=*/j+1)},
-                                          {input_S},
-                                          /*grad_outputs=*/{grad_output},
-                                          /*retain_graph=*/true,
-                                          /*create_graph=*/false);
+    {input_S},
+    /*grad_outputs=*/ {grad_output},
+    /*retain_graph=*/true,
+    /*create_graph=*/false);
     // add dimension
     auto grad = gradient[0].unsqueeze(/*dim=*/1);
     //convert to vector
@@ -168,9 +168,7 @@ void PytorchModelTest::calculate() {
     string name_comp = "node-"+std::to_string(j);
     //set derivatives of component j
     for(unsigned i=0; i<_n_in; i++)
-      setDerivative( getPntrToComponent(name_comp) ,i, der[i] );
-    //reset gradients
-    //input_S.grad().zero_();
+      setDerivative( getPntrToComponent(name_comp),i, der[i] );
   }
 }
 }
