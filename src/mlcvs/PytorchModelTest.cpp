@@ -1,12 +1,12 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 Copyright (c) 2021 of Luigi Bonati.
 
-The torch module is free software: you can redistribute it and/or modify
+The pytorch module is free software: you can redistribute it and/or modify
 it under the terms of the GNU Lesser General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 
-The opes module is distributed in the hope that it will be useful,
+The pytorch module is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU Lesser General Public License for more details.
@@ -32,16 +32,17 @@ using namespace std;
 
 namespace PLMD {
 namespace function {
+namespace mlcvs {
 
-//+PLUMEDOC FUNCTION PYTORCH MODEL
+//+PLUMEDOC MLCVS_FUNCTION PYTORCH_MODEL_TEST
 /*
-Load a model trained with Pytorch. The derivatives are set using native backpropagation in Pytorch.
+Load a Pytorch model compiled with TorchScript. The derivatives are set using native backpropagation in Pytorch.
 
 \par Examples
-Define a model that takes as inputs two distances d1 and d2 
+Define a model that takes as inputs two distances d1 and d2.
 
 \plumedfile
-model: PYTORCH_MODEL MODEL=model.pt ARG=d1,d2
+model: PYTORCH_MODEL FILE=model.ptc ARG=d1,d2
 \endplumedfile
 
 The N nodes of the neural network are saved as "model.node-0", "model.node-1", ..., "model.node-(N-1)".
@@ -171,6 +172,7 @@ void PytorchModelTest::calculate() {
     //reset gradients
     //input_S.grad().zero_();
   }
+}
 }
 }
 }

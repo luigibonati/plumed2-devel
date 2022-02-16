@@ -1,12 +1,12 @@
 /* +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 Copyright (c) 2021 of Luigi Bonati.
 
-The torch module is free software: you can redistribute it and/or modify
+The pytorch module is free software: you can redistribute it and/or modify
 it under the terms of the GNU Lesser General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 
-The opes module is distributed in the hope that it will be useful,
+The pytorch module is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU Lesser General Public License for more details.
@@ -33,8 +33,9 @@ std::vector<float> tensor_to_vector(const torch::Tensor& x) {
 
 namespace PLMD {
 namespace function {
+namespace mlcvs {
 
-//+PLUMEDOC FUNCTION PYTORCH MODEL
+//+PLUMEDOC MLCVS_FUNCTION PYTORCH_MODEL
 /*
 Load a model trained with Pytorch. The derivatives are set using native backpropagation in Pytorch.
 
@@ -158,6 +159,7 @@ void PytorchModel::calculate() {
  
   }
 
+}
 }
 }
 }
